@@ -241,6 +241,8 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	subagent1h := isSubagent && helps.ClaudeSubagentRequests1h(incomingHeaders, body)
 	if cpaOwnsCacheControl && fp.ProfileClaudeCodeCLI && (!isSubagent || subagent1h) && !isProbeOrHelper {
 		body = upgradeClaudeCacheControlTTL(body, claudeCacheControlTTL1h)
+	} else if claudeNativeMainCacheTTL1h(e.cfg, fp, confirmedClaudeCode, isSubagent, isProbeOrHelper) {
+		body = upgradeClaudeCacheControlTTL(body, claudeCacheControlTTL1h)
 	} else if isProbeOrHelper || (isSubagent && !subagent1h) {
 		body = stripClaudeCacheControlTTL(body)
 	}

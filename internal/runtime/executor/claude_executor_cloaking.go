@@ -1581,6 +1581,15 @@ func claudePayloadHasCacheableSystem(payload []byte) bool {
 // beta strictly paired the way native does. API-key credentials keep the plain
 // {"type":"ephemeral"} native default, which also avoids sending ttl to
 // Anthropic-compatible gateways that never advertised support for it.
+// claudeNativeMainCacheTTL1h reports whether a confirmed native Claude Code
+// main-conversation request should be upgraded to the 1h cache. Claude Code picks
+// 1h itself only when logged in with a subscription; through the proxy it sees an
+// API key and picks 5m, although the upstream credential is a subscription. The
+// extended-cache-ttl beta is already sent for these requests.
+func claudeNativeMainCacheTTL1h(cfg *config.Config, fp claudeFingerprintPolicy, confirmedClaudeCode, isSubagent, isProbeOrHelper bool) bool {
+	return cfg != nil && cfg.ClaudeCode.MainCacheTTL1h && confirmedClaudeCode && fp.AuthIsOAuthToken && !isSubagent && !isProbeOrHelper
+}
+
 func upgradeClaudeCacheControlTTL(payload []byte, ttl string) []byte {
 	if ttl == "" || len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return payload
