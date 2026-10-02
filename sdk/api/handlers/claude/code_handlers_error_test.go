@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -48,6 +49,27 @@ func TestClaudeErrorExtractsClaudeStyleUpstreamJSON(t *testing.T) {
 	}
 	if got.Error.Message != "This request would exceed your account's rate limit. Please try again later." {
 		t.Fatalf("error.message = %q", got.Error.Message)
+	}
+}
+
+func TestClaudeErrorPreservesUpstreamDetails(t *testing.T) {
+	handler := &ClaudeCodeAPIHandler{}
+	msg := &interfaces.ErrorMessage{
+		StatusCode: http.StatusNotFound,
+		Error:      errors.New(`{"type":"error","error":{"type":"not_found_error","message":"No thread state was found.","details":{"error_code":"thread_not_found"}},"request_id":"req_123"}`),
+	}
+
+	body, err := json.Marshal(handler.toClaudeError(msg))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := gjson.GetBytes(body, "error.details.error_code").String(); got != "thread_not_found" {
+		t.Fatalf("error.details.error_code = %q, want thread_not_found: %s", got, body)
+	}
+
+	plain, _ := json.Marshal(handler.toClaudeError(&interfaces.ErrorMessage{StatusCode: http.StatusBadRequest, Error: errors.New("bad")}))
+	if gjson.GetBytes(plain, "error.details").Exists() {
+		t.Fatalf("details present without upstream details: %s", plain)
 	}
 }
 
