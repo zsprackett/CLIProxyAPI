@@ -83,7 +83,7 @@ func TestSoonestResetSelectorPick_ProbesUnknownAndStaleResetsFirst(t *testing.T)
 	}
 }
 
-func TestWeeklyQuotaResetAt_Codex(t *testing.T) {
+func TestSoonestResetWeeklyReset_Codex(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -144,8 +144,8 @@ func TestWeeklyQuotaResetAt_Codex(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			auth := &Auth{ID: "x", Provider: "codex", Quota: QuotaState{ObservedAt: observed, Signals: tt.signals}}
-			if got := weeklyQuotaResetAt(auth, "", now); !got.Equal(tt.want) {
-				t.Fatalf("weeklyQuotaResetAt() = %v, want %v", got, tt.want)
+			if got := rankSoonestReset(auth, "", now).weeklyReset; !got.Equal(tt.want) {
+				t.Fatalf("weekly reset = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -189,7 +189,7 @@ func TestSoonestResetSelectorPick_PrefersModelScopedWeeklyReset(t *testing.T) {
 	}
 }
 
-func TestWeeklyQuotaResetAt_IgnoresModelWindowOnCredentialSnapshot(t *testing.T) {
+func TestSoonestResetWeeklyReset_IgnoresModelWindowOnCredentialSnapshot(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -201,8 +201,8 @@ func TestWeeklyQuotaResetAt_IgnoresModelWindowOnCredentialSnapshot(t *testing.T)
 			"Anthropic-Ratelimit-Unified-7d-Reset":    strconv.FormatInt(shared.Unix(), 10),
 		},
 	}}
-	if got := weeklyQuotaResetAt(auth, "claude-fable-5", now); !got.Equal(shared) {
-		t.Fatalf("weeklyQuotaResetAt() = %v, want shared 7d reset %v", got, shared)
+	if got := rankSoonestReset(auth, "claude-fable-5", now).weeklyReset; !got.Equal(shared) {
+		t.Fatalf("weekly reset = %v, want shared 7d reset %v", got, shared)
 	}
 }
 
@@ -314,5 +314,154 @@ func TestSchedulerPick_MixedProvidersSoonestReset(t *testing.T) {
 			t.Fatalf("pickMixed() #%d provider = %q, want %q", index, provider, got.Provider)
 		}
 		tried[got.ID] = struct{}{}
+	}
+}
+
+const day = 24 * time.Hour
+
+func unixString(at time.Time) string {
+	return strconv.FormatInt(at.Unix(), 10)
+}
+
+// claudeAuthWithWindows observes a 5-hour window and a weekly window at 50% use.
+func claudeAuthWithWindows(id string, fiveHourUtilization float64, fiveHourReset, weekReset time.Time) *Auth {
+	auth := claudeAuthResettingAt(id, weekReset)
+	auth.Quota.Signals["Anthropic-Ratelimit-Unified-7d-Utilization"] = "0.5"
+	auth.Quota.Signals["Anthropic-Ratelimit-Unified-5h-Utilization"] = strconv.FormatFloat(fiveHourUtilization, 'f', -1, 64)
+	auth.Quota.Signals["Anthropic-Ratelimit-Unified-5h-Reset"] = unixString(fiveHourReset)
+	return auth
+}
+
+func codexWindowSignals(position string, minutes int, usedPercent float64, resetAt time.Time) map[string]string {
+	prefix := "X-Codex-" + position + "-"
+	return map[string]string{
+		prefix + "Window-Minutes": strconv.Itoa(minutes),
+		prefix + "Used-Percent":   strconv.FormatFloat(usedPercent, 'f', -1, 64),
+		prefix + "Reset-At":       unixString(resetAt),
+	}
+}
+
+func codexAuthWithSignals(id string, signalSets ...map[string]string) *Auth {
+	signals := map[string]string{}
+	for _, set := range signalSets {
+		for key, value := range set {
+			signals[key] = value
+		}
+	}
+	return &Auth{ID: id, Provider: "codex", Quota: QuotaState{ObservedAt: time.Now(), Signals: signals}}
+}
+
+// codexWeeklyAuth observes a Codex account whose weekly window is the primary one.
+func codexWeeklyAuth(id string, usedPercent float64, resetAt time.Time) *Auth {
+	return codexAuthWithSignals(id, codexWindowSignals("Primary", weeklyWindowMinutes, usedPercent, resetAt))
+}
+
+// pickSoonestReset picks with the selector and checks the scheduler fast path agrees.
+func pickSoonestReset(t *testing.T, provider string, auths ...*Auth) string {
+	t.Helper()
+	got, err := (&SoonestResetSelector{}).Pick(context.Background(), provider, "", cliproxyexecutor.Options{}, auths)
+	if err != nil {
+		t.Fatalf("Pick() error = %v", err)
+	}
+	scheduled, errPick := newSchedulerForTest(&SoonestResetSelector{}, auths...).pickSingle(context.Background(), provider, "", cliproxyexecutor.Options{}, nil)
+	if errPick != nil {
+		t.Fatalf("pickSingle() error = %v", errPick)
+	}
+	if scheduled.ID != got.ID {
+		t.Fatalf("scheduler picked %q, selector picked %q", scheduled.ID, got.ID)
+	}
+	return got.ID
+}
+
+// An exhausted window skips the credential until that window resets.
+func TestSoonestResetSelectorPick_ExhaustionGate(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	later := func() *Auth { return claudeAuthWithWindows("b", 0.1, now.Add(4*time.Hour), now.Add(3*day)) }
+	rejected := claudeAuthWithWindows("a", 0.5, now.Add(time.Hour), now.Add(day))
+	rejected.Quota.Signals["Anthropic-Ratelimit-Unified-5h-Status"] = "rejected"
+	limitReached := codexAuthWithSignals("a",
+		codexWindowSignals("Primary", 300, 90, now.Add(2*time.Hour)),
+		codexWindowSignals("Secondary", weeklyWindowMinutes, 40, now.Add(day)),
+		map[string]string{"X-Codex-Limit-Reached": "true"},
+	)
+	fable := claudeAuthResettingAt("a", now.Add(day))
+	fable.ModelStates = map[string]*ModelState{"claude-fable-5": {Quota: QuotaState{ObservedAt: now, Signals: map[string]string{
+		"Anthropic-Ratelimit-Unified-7d_oi-Utilization": "1",
+		"Anthropic-Ratelimit-Unified-7d_oi-Reset":       unixString(now.Add(2 * day)),
+	}}}}
+
+	tests := []struct {
+		name     string
+		provider string
+		auths    []*Auth
+		want     string
+	}{
+		{
+			name:     "claude 5h utilization",
+			provider: "claude",
+			auths:    []*Auth{claudeAuthWithWindows("a", 1, now.Add(time.Hour), now.Add(day)), later()},
+			want:     "b",
+		},
+		{name: "claude 5h rejected", provider: "claude", auths: []*Auth{rejected, later()}, want: "b"},
+		{
+			name:     "claude 5h reset passed",
+			provider: "claude",
+			auths:    []*Auth{claudeAuthWithWindows("a", 1, now.Add(-time.Minute), now.Add(day)), later()},
+			want:     "a",
+		},
+		{
+			name:     "every candidate gated keeps the ordering",
+			provider: "claude",
+			auths: []*Auth{
+				claudeAuthWithWindows("a", 1, now.Add(time.Hour), now.Add(day)),
+				claudeAuthWithWindows("b", 1, now.Add(time.Hour), now.Add(3*day)),
+			},
+			want: "a",
+		},
+		{
+			name:     "codex used 100",
+			provider: "codex",
+			auths:    []*Auth{codexWeeklyAuth("a", 100, now.Add(day)), codexWeeklyAuth("b", 10, now.Add(3*day))},
+			want:     "b",
+		},
+		{
+			name:     "codex limit reached",
+			provider: "codex",
+			auths:    []*Auth{limitReached, codexWeeklyAuth("b", 10, now.Add(3*day))},
+			want:     "b",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickSoonestReset(t, tt.provider, tt.auths...); got != tt.want {
+				t.Fatalf("Pick() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// An exhausted Fable window gates only the Fable model.
+	for model, want := range map[string]string{"claude-fable-5": "b", "claude-opus-4-7": "a"} {
+		got, err := (&SoonestResetSelector{}).Pick(context.Background(), "claude", model, cliproxyexecutor.Options{}, []*Auth{fable, later()})
+		if err != nil {
+			t.Fatalf("Pick(%s) error = %v", model, err)
+		}
+		if got.ID != want {
+			t.Fatalf("Pick(%s) = %q, want %q", model, got.ID, want)
+		}
+	}
+}
+
+// A Codex window without a Window-Minutes header still gates the credential when exhausted.
+func TestSoonestResetSelectorPick_CodexWindowWithoutLengthStillGates(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	primary := codexWindowSignals("Primary", 0, 100, now.Add(time.Hour))
+	delete(primary, "X-Codex-Primary-Window-Minutes")
+	a := codexAuthWithSignals("a", primary, codexWindowSignals("Secondary", weeklyWindowMinutes, 40, now.Add(day)))
+	if got := pickSoonestReset(t, "codex", a, codexWeeklyAuth("b", 10, now.Add(3*day))); got != "b" {
+		t.Fatalf("Pick() = %q, want b", got)
 	}
 }

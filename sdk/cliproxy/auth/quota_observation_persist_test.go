@@ -52,10 +52,10 @@ func TestQuotaObservationsSurviveRestart(t *testing.T) {
 	if !ok {
 		t.Fatal("auth missing after restore")
 	}
-	if got := weeklyQuotaResetAt(restored, "", now); !got.Equal(weeklyReset) {
+	if got := rankSoonestReset(restored, "", now).weeklyReset; !got.Equal(weeklyReset) {
 		t.Fatalf("credential weekly reset = %v, want %v", got, weeklyReset)
 	}
-	if got := weeklyQuotaResetAt(restored, "claude-fable-5", now); !got.Equal(fableReset) {
+	if got := rankSoonestReset(restored, "claude-fable-5", now).weeklyReset; !got.Equal(fableReset) {
 		t.Fatalf("fable weekly reset = %v, want %v", got, fableReset)
 	}
 	if restored.Unavailable || restored.ModelStates["claude-fable-5"].Unavailable {

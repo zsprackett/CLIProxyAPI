@@ -1674,11 +1674,11 @@ func (v *readyView) pickFirst(predicate func(*scheduledAuth) bool) *scheduledAut
 	return nil
 }
 
-// pickSoonestResetScheduled returns the matching entry whose weekly quota for model resets
-// soonest. Entries are expected in ID order so ties resolve deterministically.
+// pickSoonestResetScheduled returns the matching entry that SoonestResetSelector ranks first
+// for model. Entries are expected in ID order so ties resolve deterministically.
 func pickSoonestResetScheduled(entries []*scheduledAuth, model string, predicate func(*scheduledAuth) bool, now time.Time) *scheduledAuth {
 	var picked *scheduledAuth
-	var pickedReset time.Time
+	var pickedRank soonestResetRank
 	for _, entry := range entries {
 		if entry == nil || entry.auth == nil {
 			continue
@@ -1686,10 +1686,10 @@ func pickSoonestResetScheduled(entries []*scheduledAuth, model string, predicate
 		if predicate != nil && !predicate(entry) {
 			continue
 		}
-		resetAt := weeklyQuotaResetAt(entry.auth, model, now)
-		if picked == nil || resetAt.Before(pickedReset) {
+		rank := rankSoonestReset(entry.auth, model, now)
+		if picked == nil || rank.before(pickedRank) {
 			picked = entry
-			pickedReset = resetAt
+			pickedRank = rank
 		}
 	}
 	return picked

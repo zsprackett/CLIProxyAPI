@@ -19,7 +19,10 @@ const weeklyWindowMinutes = 7 * 24 * 60
 //
 // Reset times come from the passive quota snapshot (Quota.Signals) captured from upstream
 // response headers. The requested model's own snapshot is preferred over the credential-wide
-// one, so a model-specific weekly window (Claude's Fable 7d_oi window) is honored. Credentials without a known future reset, either never observed or
+// one, so a model-specific weekly window (Claude's Fable 7d_oi window) is honored.
+// A credential is skipped while one of its observed windows is exhausted and that window's
+// reset is still ahead; when every candidate is skipped this way the ordering alone decides.
+// Credentials without a known future reset, either never observed or
 // with a reset that already passed, are picked first so a single request can learn their
 // current window. Ties fall back to ID order, which makes providers without quota
 // signals behave like fill-first.
@@ -35,12 +38,12 @@ func (s *SoonestResetSelector) Pick(ctx context.Context, provider, model string,
 	}
 	available = preferCodexWebsocketAuths(ctx, provider, available)
 	var picked *Auth
-	var pickedReset time.Time
+	var pickedRank soonestResetRank
 	for _, auth := range available {
-		resetAt := weeklyQuotaResetAt(auth, model, now)
-		if picked == nil || resetAt.Before(pickedReset) {
+		rank := rankSoonestReset(auth, model, now)
+		if picked == nil || rank.before(pickedRank) {
 			picked = auth
-			pickedReset = resetAt
+			pickedRank = rank
 		}
 	}
 	if picked == nil {
@@ -49,25 +52,51 @@ func (s *SoonestResetSelector) Pick(ctx context.Context, provider, model string,
 	return picked, nil
 }
 
-// weeklyQuotaResetAt returns the observed weekly quota reset time for auth serving model,
-// or the zero time when no future reset is known. The model-scoped snapshot is checked
-// first and the credential-wide snapshot is the fallback.
-func weeklyQuotaResetAt(auth *Auth, model string, now time.Time) time.Time {
+// soonestResetRank orders a credential for soonest-reset. The selector and the scheduler
+// fast path both rank with rankSoonestReset, so they pick the same credential.
+type soonestResetRank struct {
+	// gated is set while an observed window is exhausted and its reset is ahead.
+	gated bool
+	// weeklyReset is the weekly reset that orders credentials that are not gated.
+	weeklyReset time.Time
+}
+
+// before reports whether r goes before other: an ungated credential first, then the
+// sooner weekly reset.
+func (r soonestResetRank) before(other soonestResetRank) bool {
+	if r.gated != other.gated {
+		return !r.gated
+	}
+	return r.weeklyReset.Before(other.weeklyReset)
+}
+
+// rankSoonestReset ranks auth serving model. The weekly reset is the first future weekly
+// reset, model-scoped snapshot first, or the zero time when none is known.
+func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank {
+	var rank soonestResetRank
 	if auth == nil {
-		return time.Time{}
+		return rank
 	}
 	for _, window := range soonestResetWindows(auth, model) {
-		if window.weekly && window.resetAt.After(now) {
-			return window.resetAt
+		if !window.resetAt.After(now) {
+			continue
+		}
+		if window.exhausted {
+			rank.gated = true
+		}
+		if window.weekly && rank.weeklyReset.IsZero() {
+			rank.weeklyReset = window.resetAt
 		}
 	}
-	return time.Time{}
+	return rank
 }
 
 // quotaWindow is one observed quota window of a credential.
 type quotaWindow struct {
-	weekly  bool
-	resetAt time.Time
+	weekly      bool
+	exhausted   bool
+	usedPercent float64
+	resetAt     time.Time
 }
 
 // soonestResetWindows returns the windows observed for auth serving model: the model-scoped
@@ -95,14 +124,19 @@ func observedQuotaWindows(provider string, quota QuotaState, modelScoped bool) [
 			names = []string{"7d_oi", "5h", "7d"}
 		}
 		for _, name := range names {
-			resetAt := parseQuotaResetAt(signal("Anthropic-Ratelimit-Unified-"+name+"-Reset"), "", quota.ObservedAt)
-			if !resetAt.IsZero() {
-				windows = append(windows, quotaWindow{weekly: name != "5h", resetAt: resetAt})
+			prefix := "Anthropic-Ratelimit-Unified-" + name + "-"
+			resetAt := parseQuotaResetAt(signal(prefix+"Reset"), "", quota.ObservedAt)
+			if resetAt.IsZero() {
+				continue
 			}
+			utilization, _ := strconv.ParseFloat(signal(prefix+"Utilization"), 64)
+			rejected := strings.EqualFold(signal(prefix+"Status"), "rejected")
+			windows = append(windows, quotaWindow{weekly: name != "5h", exhausted: utilization >= 1 || rejected, resetAt: resetAt})
 		}
 	case "codex":
 		// Either position can carry the weekly window, so a window is weekly by its length.
 		// A window without a length keeps its reset but is not weekly.
+		mostUsed := 0.0
 		for _, name := range []string{"Primary", "Secondary"} {
 			prefix := "X-Codex-" + name + "-"
 			resetAt := parseQuotaResetAt(signal(prefix+"Reset-At"), signal(prefix+"Reset-After-Seconds"), quota.ObservedAt)
@@ -110,7 +144,15 @@ func observedQuotaWindows(provider string, quota QuotaState, modelScoped bool) [
 				continue
 			}
 			minutes, _ := strconv.ParseInt(signal(prefix+"Window-Minutes"), 10, 64)
-			windows = append(windows, quotaWindow{weekly: minutes >= weeklyWindowMinutes, resetAt: resetAt})
+			used, _ := strconv.ParseFloat(signal(prefix+"Used-Percent"), 64)
+			mostUsed = max(mostUsed, used)
+			windows = append(windows, quotaWindow{weekly: minutes >= weeklyWindowMinutes, usedPercent: used, resetAt: resetAt})
+		}
+		// The limit-reached flag names no window; it is the most used one.
+		limitReached, _ := strconv.ParseBool(signal("X-Codex-Limit-Reached"))
+		for i := range windows {
+			used := windows[i].usedPercent
+			windows[i].exhausted = used >= 100 || limitReached && used == mostUsed
 		}
 	}
 	return windows
