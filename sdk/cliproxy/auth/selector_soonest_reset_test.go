@@ -2,10 +2,13 @@ package auth
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"testing"
 	"time"
 
+	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
@@ -478,5 +481,80 @@ func TestSoonestResetSelectorPick_CodexWindowWithoutLengthStillGates(t *testing.
 	a := codexAuthWithSignals("a", primary, codexWindowSignals("Secondary", weeklyWindowMinutes, 40, now.Add(day)))
 	if got := pickSoonestReset(t, "codex", a, codexWeeklyAuth("b", 10, now.Add(3*day))); got != "b" {
 		t.Fatalf("Pick() = %q, want b", got)
+	}
+}
+
+func newSoonestResetManager(t *testing.T, store CooldownStateStore, auths ...*Auth) *Manager {
+	t.Helper()
+	ctx := context.Background()
+	manager := NewManager(nil, nil, nil)
+	affinity := NewSessionAffinitySelectorWithConfig(SessionAffinityConfig{Fallback: &SoonestResetSelector{}, TTL: time.Hour})
+	t.Cleanup(affinity.Stop)
+	manager.SetSelector(affinity)
+	manager.SetCooldownStateStore(store)
+	manager.RegisterExecutor(schedulerTestExecutor{provider: "codex"})
+	for _, auth := range auths {
+		if _, err := manager.Register(WithSkipPersist(ctx), auth); err != nil {
+			t.Fatalf("Register(%s): %v", auth.ID, err)
+		}
+		registry.GetGlobalRegistry().RegisterClient(auth.ID, "codex", []*registry.ModelInfo{{ID: "soonest-reset-model"}})
+		t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(auth.ID) })
+	}
+	return manager
+}
+
+func pickSession(t *testing.T, manager *Manager, session string) string {
+	t.Helper()
+	opts := cliproxyexecutor.Options{Metadata: map[string]any{cliproxyexecutor.DerivedSessionIDMetadataKey: session}}
+	auth, _, err := manager.pickNext(context.Background(), "codex", "soonest-reset-model", opts, nil)
+	if err != nil {
+		t.Fatalf("pickNext() error = %v", err)
+	}
+	return auth.ID
+}
+
+func markWithHeaders(manager *Manager, authID string, headers http.Header) {
+	ctx := internallogging.WithResponseHeadersHolder(context.Background())
+	internallogging.SetResponseHeaders(ctx, headers)
+	manager.MarkResult(ctx, Result{AuthID: authID, Provider: "codex", Model: "soonest-reset-model", Success: true})
+}
+
+func codexWeeklyHeaders(resetAt time.Time) http.Header {
+	headers := http.Header{}
+	for key, value := range codexWindowSignals("Primary", weeklyWindowMinutes, 50, resetAt) {
+		headers.Set(key, value)
+	}
+	return headers
+}
+
+// Observations of two credentials within a minute both survive a restart and order new
+// sessions after it, with no new headers.
+func TestSoonestResetSelector_PersistedObservationsSurviveRestart(t *testing.T) {
+	store := NewFileCooldownStateStore(t.TempDir())
+	now := time.Now()
+	ids := []string{"soonest-restart-a", "soonest-restart-b"}
+	resets := []time.Time{now.Add(6 * day), now.Add(day)}
+	fresh := func() []*Auth {
+		auths := make([]*Auth, len(ids))
+		for i, id := range ids {
+			auths[i] = &Auth{ID: id, Provider: "codex", Status: StatusActive}
+		}
+		return auths
+	}
+
+	first := newSoonestResetManager(t, store, fresh()...)
+	for i, id := range ids {
+		markWithHeaders(first, id, codexWeeklyHeaders(resets[i]))
+	}
+
+	second := newSoonestResetManager(t, store, fresh()...)
+	if got := pickSession(t, second, "before-restore"); got != ids[0] {
+		t.Fatalf("pick with no observations = %q, want %q (ID order)", got, ids[0])
+	}
+	if err := second.RestoreCooldownStates(context.Background()); err != nil {
+		t.Fatalf("RestoreCooldownStates() error = %v", err)
+	}
+	if got := pickSession(t, second, "after-restore"); got != ids[1] {
+		t.Fatalf("pick after restore = %q, want %q", got, ids[1])
 	}
 }

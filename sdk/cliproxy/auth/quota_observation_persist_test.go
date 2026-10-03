@@ -164,7 +164,7 @@ func (s *countingCooldownStore) Save(context.Context, []CooldownStateRecord) err
 	return nil
 }
 
-func TestMarkResultThrottlesObservationSaves(t *testing.T) {
+func TestMarkResultSavesEveryObservation(t *testing.T) {
 	store := &countingCooldownStore{}
 	m := newObservationPersistManager(t, store, "claude-e.json")
 	baseline := store.saves.Load()
@@ -177,21 +177,10 @@ func TestMarkResultThrottlesObservationSaves(t *testing.T) {
 		m.MarkResult(ctx, Result{AuthID: "claude-e.json", Provider: "claude", Model: "claude-opus", Success: true})
 	}
 
-	markWithSignals("0.10")
-	if got := store.saves.Load() - baseline; got != 1 {
-		t.Fatalf("saves after first observation = %d, want 1", got)
+	for _, utilization := range []string{"0.10", "0.11", "0.12"} {
+		markWithSignals(utilization)
 	}
-	markWithSignals("0.11")
-	markWithSignals("0.12")
-	if got := store.saves.Load() - baseline; got != 1 {
-		t.Fatalf("saves within the throttle interval = %d, want 1", got)
-	}
-
-	m.mu.Lock()
-	m.observationPersistedAt = time.Now().Add(-quotaObservationPersistInterval)
-	m.mu.Unlock()
-	markWithSignals("0.13")
-	if got := store.saves.Load() - baseline; got != 2 {
-		t.Fatalf("saves after the throttle interval = %d, want 2", got)
+	if got := store.saves.Load() - baseline; got != 3 {
+		t.Fatalf("saves after three observations = %d, want 3", got)
 	}
 }
