@@ -56,47 +56,64 @@ func weeklyQuotaResetAt(auth *Auth, model string, now time.Time) time.Time {
 	if auth == nil {
 		return time.Time{}
 	}
-	if state := existingModelState(auth, model); state != nil {
-		if resetAt := weeklyQuotaResetFromSnapshot(auth.Provider, state.Quota, true, now); !resetAt.IsZero() {
-			return resetAt
+	for _, window := range soonestResetWindows(auth, model) {
+		if window.weekly && window.resetAt.After(now) {
+			return window.resetAt
 		}
 	}
-	return weeklyQuotaResetFromSnapshot(auth.Provider, auth.Quota, false, now)
+	return time.Time{}
 }
 
-// weeklyQuotaResetFromSnapshot extracts the weekly reset time from one quota snapshot.
+// quotaWindow is one observed quota window of a credential.
+type quotaWindow struct {
+	weekly  bool
+	resetAt time.Time
+}
+
+// soonestResetWindows returns the windows observed for auth serving model: the model-scoped
+// snapshot first, then the credential-wide snapshot.
+func soonestResetWindows(auth *Auth, model string) []quotaWindow {
+	var windows []quotaWindow
+	if state := existingModelState(auth, model); state != nil {
+		windows = observedQuotaWindows(auth.Provider, state.Quota, true)
+	}
+	return append(windows, observedQuotaWindows(auth.Provider, auth.Quota, false)...)
+}
+
+// observedQuotaWindows reads the windows of one quota snapshot that have a known reset.
 // Model-specific windows are only read from model-scoped snapshots, because the
 // credential-wide snapshot may have been captured from a different model's response.
-func weeklyQuotaResetFromSnapshot(provider string, quota QuotaState, modelScoped bool, now time.Time) time.Time {
-	if len(quota.Signals) == 0 {
-		return time.Time{}
-	}
+func observedQuotaWindows(provider string, quota QuotaState, modelScoped bool) []quotaWindow {
 	signal := func(name string) string {
 		return strings.TrimSpace(quota.Signals[http.CanonicalHeaderKey(name)])
 	}
-	var resetAt time.Time
+	var windows []quotaWindow
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "claude":
+		names := []string{"5h", "7d"}
 		if modelScoped {
-			resetAt = parseQuotaResetAt(signal("Anthropic-Ratelimit-Unified-7d_oi-Reset"), "", quota.ObservedAt)
+			names = []string{"7d_oi", "5h", "7d"}
 		}
-		if resetAt.IsZero() {
-			resetAt = parseQuotaResetAt(signal("Anthropic-Ratelimit-Unified-7d-Reset"), "", quota.ObservedAt)
-		}
-	case "codex":
-		// Codex reports the weekly limit as the secondary window. Accounts without a
-		// secondary window may expose the weekly limit as the primary one instead.
-		resetAt = parseQuotaResetAt(signal("X-Codex-Secondary-Reset-At"), signal("X-Codex-Secondary-Reset-After-Seconds"), quota.ObservedAt)
-		if resetAt.IsZero() {
-			if minutes, errParse := strconv.ParseInt(signal("X-Codex-Primary-Window-Minutes"), 10, 64); errParse == nil && minutes >= weeklyWindowMinutes {
-				resetAt = parseQuotaResetAt(signal("X-Codex-Primary-Reset-At"), signal("X-Codex-Primary-Reset-After-Seconds"), quota.ObservedAt)
+		for _, name := range names {
+			resetAt := parseQuotaResetAt(signal("Anthropic-Ratelimit-Unified-"+name+"-Reset"), "", quota.ObservedAt)
+			if !resetAt.IsZero() {
+				windows = append(windows, quotaWindow{weekly: name != "5h", resetAt: resetAt})
 			}
 		}
+	case "codex":
+		// Either position can carry the weekly window, so a window is weekly by its length.
+		// A window without a length keeps its reset but is not weekly.
+		for _, name := range []string{"Primary", "Secondary"} {
+			prefix := "X-Codex-" + name + "-"
+			resetAt := parseQuotaResetAt(signal(prefix+"Reset-At"), signal(prefix+"Reset-After-Seconds"), quota.ObservedAt)
+			if resetAt.IsZero() {
+				continue
+			}
+			minutes, _ := strconv.ParseInt(signal(prefix+"Window-Minutes"), 10, 64)
+			windows = append(windows, quotaWindow{weekly: minutes >= weeklyWindowMinutes, resetAt: resetAt})
+		}
 	}
-	if !resetAt.After(now) {
-		return time.Time{}
-	}
-	return resetAt
+	return windows
 }
 
 // parseQuotaResetAt resolves a reset time from an absolute unix timestamp or, failing

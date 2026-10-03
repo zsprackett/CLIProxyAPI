@@ -96,14 +96,34 @@ func TestWeeklyQuotaResetAt_Codex(t *testing.T) {
 		want    time.Time
 	}{
 		{
-			name:    "secondary reset-at",
-			signals: map[string]string{"X-Codex-Secondary-Reset-At": strconv.FormatInt(resetAt.Unix(), 10)},
-			want:    resetAt,
+			name: "secondary reset-at",
+			signals: map[string]string{
+				"X-Codex-Secondary-Window-Minutes": "10080",
+				"X-Codex-Secondary-Reset-At":       strconv.FormatInt(resetAt.Unix(), 10),
+			},
+			want: resetAt,
 		},
 		{
-			name:    "secondary reset-after-seconds",
-			signals: map[string]string{"X-Codex-Secondary-Reset-After-Seconds": "3600"},
-			want:    observed.Add(time.Hour),
+			name: "secondary reset-after-seconds",
+			signals: map[string]string{
+				"X-Codex-Secondary-Window-Minutes":      "10080",
+				"X-Codex-Secondary-Reset-After-Seconds": "3600",
+			},
+			want: observed.Add(time.Hour),
+		},
+		{
+			name: "weekly primary before short secondary",
+			signals: map[string]string{
+				"X-Codex-Primary-Window-Minutes":   "10080",
+				"X-Codex-Primary-Reset-At":         strconv.FormatInt(resetAt.Unix(), 10),
+				"X-Codex-Secondary-Window-Minutes": "300",
+				"X-Codex-Secondary-Reset-At":       strconv.FormatInt(now.Add(time.Hour).Unix(), 10),
+			},
+			want: resetAt,
+		},
+		{
+			name:    "window without length is not weekly",
+			signals: map[string]string{"X-Codex-Secondary-Reset-At": strconv.FormatInt(resetAt.Unix(), 10)},
 		},
 		{
 			name: "weekly primary window",
