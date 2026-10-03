@@ -744,6 +744,9 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 	if claims := extractCodexIDTokenClaims(auth); claims != nil {
 		entry["id_token"] = claims
 	}
+	if planType := authClaudePlanType(auth); planType != "" {
+		entry["plan_type"] = planType
+	}
 	// Expose priority from Attributes (set by synthesizer from JSON "priority" field).
 	// Fall back to Metadata for auths registered via UploadAuthFile (no synthesizer).
 	if p := strings.TrimSpace(authAttribute(auth, "priority")); p != "" {
@@ -942,6 +945,19 @@ func extractCodexIDTokenClaims(auth *coreauth.Auth) gin.H {
 		return nil
 	}
 	return result
+}
+
+// authClaudePlanType reports the subscription plan recorded on a Claude
+// credential from its OAuth profile at login, token refresh or first use.
+func authClaudePlanType(auth *coreauth.Auth) string {
+	if auth == nil || auth.Metadata == nil {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "claude") {
+		return ""
+	}
+	planType, _ := auth.Metadata["plan_type"].(string)
+	return strings.ToLower(strings.TrimSpace(planType))
 }
 
 func authEmail(auth *coreauth.Auth) string {
