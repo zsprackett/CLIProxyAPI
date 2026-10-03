@@ -106,18 +106,29 @@ func TestQuotaObservationSharesRecordWithCooldown(t *testing.T) {
 	}
 }
 
-func TestStaleQuotaObservationIsNotPersisted(t *testing.T) {
+// An observation nine days old still survives a restart, and its passed Claude weekly
+// reset rolls forward a week.
+func TestOldQuotaObservationSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
 	store := NewFileCooldownStateStore(t.TempDir())
-	m := newObservationPersistManager(t, store, "claude-c.json")
-	m.mu.Lock()
-	m.auths["claude-c.json"].Quota = QuotaState{
-		ObservedAt: time.Now().Add(-quotaObservationRetention - time.Hour),
-		Signals:    map[string]string{"Anthropic-Ratelimit-Unified-7d-Utilization": "0.5"},
-	}
-	m.mu.Unlock()
+	weeklyReset := time.Now().Add(-2 * 24 * time.Hour).Truncate(time.Second)
 
-	if records := m.cooldownStateRecordsSnapshot(); len(records) != 0 {
-		t.Fatalf("stale observation was persisted: %+v", records)
+	first := newObservationPersistManager(t, store, "claude-c.json")
+	first.mu.Lock()
+	first.auths["claude-c.json"].Quota = QuotaState{
+		ObservedAt: time.Now().Add(-9 * 24 * time.Hour),
+		Signals:    map[string]string{"Anthropic-Ratelimit-Unified-7d-Reset": strconv.FormatInt(weeklyReset.Unix(), 10)},
+	}
+	first.mu.Unlock()
+	first.persistCooldownStates(ctx)
+
+	second := newObservationPersistManager(t, store, "claude-c.json")
+	if err := second.RestoreCooldownStates(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	restored, _ := second.GetByID("claude-c.json")
+	if got, want := rankSoonestReset(restored, "", time.Now()).weeklyReset, weeklyReset.Add(week); !got.Equal(want) {
+		t.Fatalf("weekly reset = %v, want %v", got, want)
 	}
 }
 
