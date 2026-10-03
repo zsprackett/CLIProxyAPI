@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -557,4 +558,93 @@ func TestSoonestResetSelector_PersistedObservationsSurviveRestart(t *testing.T) 
 	if got := pickSession(t, second, "after-restore"); got != ids[1] {
 		t.Fatalf("pick after restore = %q, want %q", got, ids[1])
 	}
+}
+
+// Codex order follows the weekly window, which is chosen by length, not position.
+func TestSoonestResetSelectorPick_CodexWeeklyWindowByLength(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	if got := pickSoonestReset(t, "codex",
+		codexWeeklyAuth("a", 50, now.Add(6*day)),
+		codexWeeklyAuth("b", 50, now.Add(1*day)),
+		codexWeeklyAuth("c", 50, now.Add(3*day)),
+	); got != "b" {
+		t.Fatalf("Pick() = %q, want b", got)
+	}
+
+	// x's 5-hour primary window resets first, but y's weekly window resets before x's.
+	x := codexAuthWithSignals("x",
+		codexWindowSignals("Primary", 300, 10, now.Add(time.Hour)),
+		codexWindowSignals("Secondary", weeklyWindowMinutes, 50, now.Add(5*day)),
+	)
+	y := codexAuthWithSignals("y", codexWindowSignals("Secondary", weeklyWindowMinutes, 50, now.Add(2*day)))
+	if got := pickSoonestReset(t, "codex", x, y); got != "y" {
+		t.Fatalf("Pick() = %q, want y", got)
+	}
+}
+
+// A small remainder resetting soon is used before a fresh window resetting late.
+func TestSoonestResetSelectorPick_SmallRemainderResettingSoonFirst(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	if got := pickSoonestReset(t, "codex",
+		codexWeeklyAuth("a", 0, now.Add(5*day)),
+		codexWeeklyAuth("b", 98, now.Add(6*time.Hour)),
+	); got != "b" {
+		t.Fatalf("Pick() = %q, want b", got)
+	}
+}
+
+// Routing reaches the selector through session affinity, and a bound session stays put.
+func TestSoonestResetSelector_RoutedThroughSessionAffinity(t *testing.T) {
+	now := time.Now()
+	manager := newSoonestResetManager(t, nil,
+		codexWeeklyAuth("soonest-routing-a", 50, now.Add(3*day)),
+		codexWeeklyAuth("soonest-routing-b", 50, now.Add(day)),
+	)
+	if manager.useSchedulerFastPath() {
+		t.Fatal("session affinity must use the legacy pick path")
+	}
+	if got := pickSession(t, manager, "first"); got != "soonest-routing-b" {
+		t.Fatalf("new session = %q, want soonest-routing-b", got)
+	}
+
+	markWithHeaders(manager, "soonest-routing-a", codexWeeklyHeaders(now.Add(time.Hour)))
+	if got := pickSession(t, manager, "first"); got != "soonest-routing-b" {
+		t.Fatalf("bound session = %q, want soonest-routing-b", got)
+	}
+	if got := pickSession(t, manager, "second"); got != "soonest-routing-a" {
+		t.Fatalf("new session after observation = %q, want soonest-routing-a", got)
+	}
+}
+
+// Quota signals written by MarkResult and read by the selector do not race.
+func TestSoonestResetSelector_ConcurrentObservationAndPick(t *testing.T) {
+	now := time.Now()
+	manager := newSoonestResetManager(t, nil,
+		&Auth{ID: "soonest-race-a", Provider: "codex", Status: StatusActive},
+		&Auth{ID: "soonest-race-b", Provider: "codex", Status: StatusActive},
+	)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				markWithHeaders(manager, "soonest-race-a", codexWeeklyHeaders(now.Add(time.Duration(j)*time.Hour)))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				opts := cliproxyexecutor.Options{Metadata: map[string]any{cliproxyexecutor.DerivedSessionIDMetadataKey: strconv.Itoa(j)}}
+				if _, _, err := manager.pickNext(context.Background(), "codex", "soonest-reset-model", opts, nil); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
