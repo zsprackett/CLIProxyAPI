@@ -64,22 +64,35 @@ func TestSoonestResetSelectorPick_SkipsCoolingDownAuth(t *testing.T) {
 	}
 }
 
-func TestSoonestResetSelectorPick_ProbesUnknownAndStaleResetsFirst(t *testing.T) {
+// An unknown Claude reset sorts first, an unknown or passed Codex reset sorts last, and a
+// passed Claude reset rolls forward by whole weeks.
+func TestSoonestResetSelectorPick_UnknownResets(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
-	auths := []*Auth{
+	if got := pickSoonestReset(t, "codex",
+		&Auth{ID: "a", Provider: "codex"},
+		codexWeeklyAuth("b", 50, now.Add(-time.Hour)),
+		codexWeeklyAuth("c", 50, now.Add(6*day)),
+	); got != "c" {
+		t.Fatalf("codex Pick() = %q, want c", got)
+	}
+	if got := pickSoonestReset(t, "claude",
 		claudeAuthResettingAt("a", now.Add(time.Hour)),
-		claudeAuthResettingAt("c", now.Add(-time.Hour)),
-		{ID: "d", Provider: "claude"},
+		&Auth{ID: "b", Provider: "claude"},
+	); got != "b" {
+		t.Fatalf("claude Pick() = %q, want b", got)
 	}
-
-	got, err := (&SoonestResetSelector{}).Pick(context.Background(), "claude", "", cliproxyexecutor.Options{}, auths)
-	if err != nil {
-		t.Fatalf("Pick() error = %v", err)
+	// b's reset passed six days ago, so its next one is in one day.
+	if got := pickSoonestReset(t, "claude",
+		claudeAuthResettingAt("a", now.Add(2*day)),
+		claudeAuthResettingAt("b", now.Add(-6*day)),
+	); got != "b" {
+		t.Fatalf("claude rolled-forward Pick() = %q, want b", got)
 	}
-	if got.ID != "c" {
-		t.Fatalf("Pick() auth.ID = %q, want %q (stale reset sorts with unknown, ties by ID)", got.ID, "c")
+	rolled := rankSoonestReset(claudeAuthResettingAt("b", now.Add(-6*day)), "", now).weeklyReset
+	if want := time.Unix(now.Add(-6*day).Unix(), 0).Add(week); !rolled.Equal(want) {
+		t.Fatalf("rolled reset = %v, want %v", rolled, want)
 	}
 }
 
@@ -124,6 +137,7 @@ func TestSoonestResetWeeklyReset_Codex(t *testing.T) {
 		{
 			name:    "window without length is not weekly",
 			signals: map[string]string{"X-Codex-Secondary-Reset-At": strconv.FormatInt(resetAt.Unix(), 10)},
+			want:    unknownResetLast,
 		},
 		{
 			name: "weekly primary window",
@@ -139,6 +153,7 @@ func TestSoonestResetWeeklyReset_Codex(t *testing.T) {
 				"X-Codex-Primary-Window-Minutes": "300",
 				"X-Codex-Primary-Reset-At":       strconv.FormatInt(resetAt.Unix(), 10),
 			},
+			want: unknownResetLast,
 		},
 	}
 	for _, tt := range tests {
@@ -290,7 +305,7 @@ func TestSchedulerPick_MixedProvidersSoonestReset(t *testing.T) {
 		Provider: "codex",
 		Quota: QuotaState{
 			ObservedAt: now,
-			Signals:    map[string]string{"X-Codex-Secondary-Reset-At": strconv.FormatInt(now.Add(time.Hour).Unix(), 10)},
+			Signals:    codexWindowSignals("Secondary", weeklyWindowMinutes, 0, now.Add(time.Hour)),
 		},
 	}
 	scheduler := newSchedulerForTest(

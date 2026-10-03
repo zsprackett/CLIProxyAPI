@@ -10,8 +10,14 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
-// weeklyWindowMinutes is the length of the weekly quota window advertised by Codex.
-const weeklyWindowMinutes = 7 * 24 * 60
+const (
+	// weeklyWindowMinutes is the length of the weekly quota window advertised by Codex.
+	weeklyWindowMinutes = 7 * 24 * 60
+	week                = 7 * 24 * time.Hour
+)
+
+// unknownResetLast orders a credential after every credential with a known reset.
+var unknownResetLast = time.Unix(1<<62, 0)
 
 // SoonestResetSelector prefers the credential whose weekly (7-day) quota window resets
 // soonest, so quota that would otherwise expire unused at the reset is consumed first.
@@ -22,10 +28,12 @@ const weeklyWindowMinutes = 7 * 24 * 60
 // one, so a model-specific weekly window (Claude's Fable 7d_oi window) is honored.
 // A credential is skipped while one of its observed windows is exhausted and that window's
 // reset is still ahead; when every candidate is skipped this way the ordering alone decides.
-// Credentials without a known future reset, either never observed or
-// with a reset that already passed, are picked first so a single request can learn their
-// current window. Ties fall back to ID order, which makes providers without quota
-// signals behave like fill-first.
+//
+// An unknown Claude weekly reset sorts first: the window runs on a fixed per-account
+// schedule, so one request learns it. A passed Claude reset rolls forward by whole weeks.
+// An unknown or passed Codex weekly reset sorts last: that window is usually unstarted and
+// starting it early can waste it. Ties fall back to ID order, which makes providers without
+// quota signals behave like fill-first.
 type SoonestResetSelector struct{}
 
 // Pick selects the available auth whose weekly quota window resets soonest.
@@ -71,14 +79,20 @@ func (r soonestResetRank) before(other soonestResetRank) bool {
 }
 
 // rankSoonestReset ranks auth serving model. The weekly reset is the first future weekly
-// reset, model-scoped snapshot first, or the zero time when none is known.
+// reset, model-scoped snapshot first. Without one, a Claude credential uses its first passed
+// weekly reset rolled forward by whole weeks, or the zero time when none was observed, and
+// any other credential sorts last.
 func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank {
 	var rank soonestResetRank
 	if auth == nil {
 		return rank
 	}
+	var passed time.Time
 	for _, window := range soonestResetWindows(auth, model) {
 		if !window.resetAt.After(now) {
+			if window.weekly && passed.IsZero() {
+				passed = window.resetAt
+			}
 			continue
 		}
 		if window.exhausted {
@@ -87,6 +101,13 @@ func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank 
 		if window.weekly && rank.weeklyReset.IsZero() {
 			rank.weeklyReset = window.resetAt
 		}
+	}
+	switch {
+	case !rank.weeklyReset.IsZero():
+	case !strings.EqualFold(strings.TrimSpace(auth.Provider), "claude"):
+		rank.weeklyReset = unknownResetLast
+	case !passed.IsZero():
+		rank.weeklyReset = passed.Add(week * (now.Sub(passed)/week + 1))
 	}
 	return rank
 }
