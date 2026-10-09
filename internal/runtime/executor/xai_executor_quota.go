@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -32,7 +33,7 @@ func (e *XAIExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth) (h
 	if errWeekly != nil && errMonthly != nil {
 		return nil, errWeekly
 	}
-	return helps.XAIBillingQuotaHeaders(weekly, monthly), nil
+	return helps.XAIBillingQuotaHeaders(weekly, monthly, time.Now()), nil
 }
 
 func (e *XAIExecutor) fetchXAIBilling(ctx context.Context, auth *cliproxyauth.Auth, url string) ([]byte, error) {

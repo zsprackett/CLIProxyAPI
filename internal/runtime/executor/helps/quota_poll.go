@@ -112,10 +112,10 @@ type xaiBillingSummary struct {
 // x-xai-billing-* headers. The weekly (format=credits) payload wins when it
 // reports a period; the monthly payload is the fallback. This mirrors the
 // management UI's billing summary so a polled snapshot matches a live fetch.
-func XAIBillingQuotaHeaders(weeklyBody, monthlyBody []byte) http.Header {
-	summary, ok := parseXAIBillingSummary(weeklyBody)
+func XAIBillingQuotaHeaders(weeklyBody, monthlyBody []byte, now time.Time) http.Header {
+	summary, ok := parseXAIBillingSummary(weeklyBody, now)
 	if !ok {
-		summary, ok = parseXAIBillingSummary(monthlyBody)
+		summary, ok = parseXAIBillingSummary(monthlyBody, now)
 	}
 	if !ok {
 		return nil
@@ -134,14 +134,15 @@ func XAIBillingQuotaHeaders(weeklyBody, monthlyBody []byte) http.Header {
 	return headers
 }
 
-func parseXAIBillingSummary(body []byte) (xaiBillingSummary, bool) {
+func parseXAIBillingSummary(body []byte, now time.Time) (xaiBillingSummary, bool) {
 	config := gjson.GetBytes(body, "config")
 	if !config.IsObject() {
 		return xaiBillingSummary{}, false
 	}
 	period := firstCodexQuotaResult(config, "currentPeriod", "current_period")
 	rawPeriodType := strings.ToLower(period.Get("type").String())
-	creditUsage, hasCreditUsage := quotaNumber(firstCodexQuotaResult(config, "creditUsagePercent", "credit_usage_percent"))
+	rawCreditUsage := firstCodexQuotaResult(config, "creditUsagePercent", "credit_usage_percent")
+	creditUsage, hasCreditUsage := quotaNumber(rawCreditUsage)
 	productUsage := firstCodexQuotaResult(config, "productUsage", "product_usage")
 	monthlyLimit, hasMonthlyLimit := xaiBillingCents(firstCodexQuotaResult(config, "monthlyLimit", "monthly_limit"))
 	used, hasUsed := xaiBillingCents(config.Get("used"))
@@ -161,6 +162,14 @@ func parseXAIBillingSummary(body []byte) (xaiBillingSummary, bool) {
 		summary := xaiBillingSummary{periodType: "weekly"}
 		if strings.Contains(rawPeriodType, "monthly") && !strings.Contains(rawPeriodType, "weekly") {
 			summary.periodType = "monthly"
+		}
+		periodStart, hasPeriodStart := parseQuotaInstant(period.Get("start"))
+		periodEnd, hasPeriodEnd := parseQuotaInstant(period.Get("end"))
+		if !rawCreditUsage.Exists() && hasPeriodStart && hasPeriodEnd && !now.Before(periodStart) && now.Before(periodEnd) {
+			// creditUsagePercent is an implicit-presence proto3 float, so the
+			// response omits it at zero. Grok's own clients read an omitted value
+			// within the active period as 0% used. A malformed value stays unknown.
+			creditUsage, hasCreditUsage = 0, true
 		}
 		if hasCreditUsage {
 			summary.usedPercent = &creditUsage
