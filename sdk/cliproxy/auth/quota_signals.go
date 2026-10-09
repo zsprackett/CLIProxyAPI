@@ -16,7 +16,7 @@ const (
 // passive credential-level quota snapshot understood by collectQuotaSignals.
 func ProviderSupportsQuotaObservation(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "claude", "codex", "devin":
+	case "claude", "codex", "devin", "xai":
 		return true
 	default:
 		return false
@@ -175,6 +175,11 @@ func isQuotaSignalHeaderForProvider(provider, name string) bool {
 	}
 	if strings.HasPrefix(name, "anthropic-ratelimit-unified-") {
 		return provider == "claude"
+	}
+	if strings.HasPrefix(name, "x-xai-billing-") {
+		// Grok responses carry no quota headers; these are synthesized from the
+		// billing endpoint by the quota poller.
+		return provider == "xai"
 	}
 	if strings.HasPrefix(name, "x-ratelimit-") {
 		// Observed Codex responses do not carry x-ratelimit-* headers; the only

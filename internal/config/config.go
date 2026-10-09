@@ -84,6 +84,11 @@ type Config struct {
 	// When <= 0, the default worker count is used.
 	AuthAutoRefreshWorkers int `yaml:"auth-auto-refresh-workers" json:"auth-auto-refresh-workers"`
 
+	// QuotaPollIntervalSeconds, when > 0, periodically fetches each OAuth credential's usage
+	// from its provider (Claude, Codex, xAI) and records it as the observed quota snapshot.
+	// When <= 0, quota polling is disabled.
+	QuotaPollIntervalSeconds int `yaml:"quota-poll-interval-seconds" json:"quota-poll-interval-seconds"`
+
 	// RequestRetry defines the number of additional credential retry rounds after
 	// the first round has exhausted its eligible credentials.
 	RequestRetry int `yaml:"request-retry" json:"request-retry"`

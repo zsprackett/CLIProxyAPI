@@ -722,6 +722,12 @@ oauth:
   # When > 0, overrides the default worker count (16).
   # auth-auto-refresh-workers: 16
 
+  # Periodically fetch each OAuth credential's usage from its provider (Claude, Codex, xAI)
+  # and record it as the observed quota snapshot shown in the management quota page and used
+  # by quota-aware routing. Uses the current access token; it never refreshes tokens.
+  # Value is in seconds; 0 or a negative value disables it (default). Example: 300 = every 5 minutes.
+  # quota-poll-interval-seconds: 300
+
   # Global OAuth model name aliases (per channel)
   # These aliases rename model IDs for both model listing and request routing.
   # Supported channels: vertex, aistudio, antigravity, claude, codex, kimi, xai, meta.
