@@ -133,7 +133,7 @@ func TestQuotaStateObserveResponseHeadersRetainsMeasuredClaudeAndCodexWatermarks
 }
 
 func TestQuotaStateObserveResponseHeadersDropsKimiGrokAndAntigravitySignals(t *testing.T) {
-	for _, provider := range []string{"kimi", "xai", "grok", "antigravity", "gemini", "vertex", "aistudio"} {
+	for _, provider := range []string{"kimi", "grok", "antigravity", "gemini", "vertex", "aistudio"} {
 		quota := QuotaState{
 			ObservedAt: time.Unix(1786082736, 0),
 			Signals:    map[string]string{"old": "value"},
@@ -147,6 +147,34 @@ func TestQuotaStateObserveResponseHeadersDropsKimiGrokAndAntigravitySignals(t *t
 		if !changed || !quota.ObservedAt.IsZero() || len(quota.Signals) != 0 {
 			t.Fatalf("provider %s retained observation signals: changed=%v quota=%#v", provider, changed, quota)
 		}
+	}
+}
+
+func TestQuotaStateObserveXAIKeepsOnlyBillingSignals(t *testing.T) {
+	previous := time.Unix(1786082736, 0)
+	quota := QuotaState{ObservedAt: previous, Signals: map[string]string{"X-Xai-Billing-Used-Percent": "10"}}
+	// Real Grok traffic carries no billing signals and must leave the polled snapshot intact.
+	if quota.ObserveResponseHeadersForProvider("xai", http.Header{
+		"X-Ratelimit-Remaining-Requests": []string{"0"},
+		"Retry-After":                    []string{"60"},
+	}, time.Now()) {
+		t.Fatal("xai response without billing signals changed the snapshot")
+	}
+	if !quota.ObservedAt.Equal(previous) || quota.Signals["X-Xai-Billing-Used-Percent"] != "10" {
+		t.Fatalf("xai snapshot changed: %#v", quota)
+	}
+
+	observedAt := time.Unix(1786090000, 0)
+	if !quota.ObserveResponseHeadersForProvider("xai", http.Header{
+		"X-Xai-Billing-Used-Percent": []string{"42.5"},
+		"X-Xai-Billing-Reset-At":     []string{"1786400000"},
+		"X-Ratelimit-Limit-Requests": []string{"100"},
+	}, observedAt) {
+		t.Fatal("xai billing signals were not observed")
+	}
+	want := map[string]string{"X-Xai-Billing-Used-Percent": "42.5", "X-Xai-Billing-Reset-At": "1786400000"}
+	if !reflect.DeepEqual(quota.Signals, want) || !quota.ObservedAt.Equal(observedAt) {
+		t.Fatalf("xai snapshot = %#v, want signals %#v", quota, want)
 	}
 }
 
@@ -376,15 +404,15 @@ func TestObserveResponseHeadersTruncatesDeterministically(t *testing.T) {
 
 func TestProviderSupportsQuotaObservation(t *testing.T) {
 	for _, provider := range []string{
-		"", "kimi", "xai", "grok", "antigravity", "gemini", "gemini-interactions",
+		"", "kimi", "grok", "antigravity", "gemini", "gemini-interactions",
 		"vertex", "aistudio", "openai", "openai-compatibility", "third-party-plugin",
-		"XAI", " Grok ", " Gemini ",
+		" Grok ", " Gemini ",
 	} {
 		if ProviderSupportsQuotaObservation(provider) {
 			t.Fatalf("provider %q unexpectedly supports quota observation", provider)
 		}
 	}
-	for _, provider := range []string{"codex", "claude", "devin", "CODEX", " Claude ", " Devin "} {
+	for _, provider := range []string{"codex", "claude", "devin", "xai", "CODEX", " Claude ", " Devin ", "XAI"} {
 		if !ProviderSupportsQuotaObservation(provider) {
 			t.Fatalf("provider %q unexpectedly excluded from quota observation", provider)
 		}

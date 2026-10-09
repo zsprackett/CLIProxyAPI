@@ -34,6 +34,11 @@ const (
 	RedirectURI      = "http://localhost:54545/callback"
 	ClaudeOAuthScope = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 
+	// UsageURL reports the subscription's rate-limit window utilization, as shown by /usage.
+	UsageURL = "https://api.anthropic.com/api/oauth/usage"
+	// oauthBetaHeaderValue is the anthropic-beta value the usage endpoint requires.
+	oauthBetaHeaderValue = "oauth-2025-04-20"
+
 	claudeRefreshMinBackoff       = 5 * time.Second
 	claudeRefreshMaxBackoff       = 5 * time.Minute
 	claudeRefreshTimeout          = 30 * time.Second
@@ -226,7 +231,7 @@ func applyClaudeOAuthAxiosHeaders(req *http.Request) {
 
 // fetchOAuthControlPlaneJSON issues an Axios-shaped OAuth control-plane GET and
 // returns the decoded response body. label names the endpoint in error text.
-func (o *ClaudeAuth) fetchOAuthControlPlaneJSON(ctx context.Context, endpoint, accessToken, label string) ([]byte, error) {
+func (o *ClaudeAuth) fetchOAuthControlPlaneJSON(ctx context.Context, endpoint, accessToken, label string, extraHeaders ...[2]string) ([]byte, error) {
 	if o == nil || o.httpClient == nil {
 		return nil, fmt.Errorf("fetch Claude OAuth %s: HTTP client is nil", label)
 	}
@@ -241,6 +246,9 @@ func (o *ClaudeAuth) fetchOAuthControlPlaneJSON(ctx context.Context, endpoint, a
 	applyClaudeOAuthAxiosHeaders(req)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Cache-Control", "no-cache")
+	for _, header := range extraHeaders {
+		req.Header.Set(header[0], header[1])
+	}
 
 	resp, errDo := o.httpClient.Do(req)
 	if errDo != nil {
@@ -275,6 +283,11 @@ func (o *ClaudeAuth) FetchOAuthProfile(ctx context.Context, accessToken string) 
 		return nil, fmt.Errorf("fetch Claude OAuth profile: response account UUID is empty")
 	}
 	return &profile, nil
+}
+
+// FetchOAuthUsage retrieves the raw rate-limit usage payload for an OAuth access token.
+func (o *ClaudeAuth) FetchOAuthUsage(ctx context.Context, accessToken string) ([]byte, error) {
+	return o.fetchOAuthControlPlaneJSON(ctx, UsageURL, accessToken, "usage", [2]string{"anthropic-beta", oauthBetaHeaderValue})
 }
 
 // FetchOAuthRoles performs the claude_cli roles lookup the native client issues
