@@ -735,7 +735,7 @@ oauth:
   # quota-forecast:
   #   enabled: true
   #   retention-days: 14          # 1-60, default 14
-  #   alert-lead-hours: 0         # 0 = alert on any projected shortfall before reset
+  #   alert-lead-hours: 0         # 0 = alert on any projected shortfall before reset (daily+ windows)
   #   alert-webhook-url: ""       # optional JSON POST when a pool is projected to run out
 
   # Global OAuth model name aliases (per channel)

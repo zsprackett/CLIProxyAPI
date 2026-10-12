@@ -64,6 +64,17 @@ func TestAlertFiresOncePerResetCycle(t *testing.T) {
 	}
 }
 
+func TestAlertsIgnoreSessionWindows(t *testing.T) {
+	h := newHistory()
+	pool := shortPool(testNow, time.Hour, 2*time.Hour)
+	pool.Class, pool.WindowSeconds = "claude:5h", 5*3600
+	for i := 0; i < 5; i++ {
+		if fired := h.evaluateAlerts([]Pool{pool}, testNow, 0); len(fired) != 0 {
+			t.Fatal("5h session windows must not alert")
+		}
+	}
+}
+
 func TestAlertLeadHoursSuppressesDistantShortfalls(t *testing.T) {
 	h := newHistory()
 	for i := 0; i < 5; i++ {

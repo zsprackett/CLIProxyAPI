@@ -25,6 +25,9 @@ const (
 	alertResolveAfter = 10
 	// webhookTimeout bounds the alert webhook POST so a hung receiver cannot pin a goroutine.
 	webhookTimeout = 10 * time.Second
+	// minAlertWindow skips short session windows (e.g. Claude 5h), whose resets start
+	// on first use and whose shortfalls are routine and brief.
+	minAlertWindow = int64(24 * time.Hour / time.Second)
 )
 
 // evaluateAlerts advances the per-class alert state machine with the latest pool
@@ -35,7 +38,9 @@ func (h *history) evaluateAlerts(pools []Pool, now time.Time, lead time.Duration
 	nowUnix := now.Unix()
 	byClass := make(map[string]Pool, len(pools))
 	for _, p := range pools {
-		byClass[p.Class] = p
+		if p.WindowSeconds >= minAlertWindow {
+			byClass[p.Class] = p
+		}
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
