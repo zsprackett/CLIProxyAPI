@@ -933,3 +933,13 @@ func TestV8SecretHashResolvesReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestV8QuotaForecastPath(t *testing.T) {
+	cfg, err := ParseConfigBytes([]byte("config-version: 8\noauth:\n  quota-forecast:\n    enabled: true\n    retention-days: 7\n    alert-webhook-url: https://hooks.example/x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.QuotaForecast.Enabled || cfg.QuotaForecast.RetentionDays != 7 || cfg.QuotaForecast.AlertWebhookURL != "https://hooks.example/x" {
+		t.Fatalf("quota forecast config = %+v", cfg.QuotaForecast)
+	}
+}

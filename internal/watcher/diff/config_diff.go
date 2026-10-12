@@ -58,6 +58,18 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.QuotaPollIntervalSeconds != newCfg.QuotaPollIntervalSeconds {
 		changes = append(changes, fmt.Sprintf("quota-poll-interval-seconds: %d -> %d", oldCfg.QuotaPollIntervalSeconds, newCfg.QuotaPollIntervalSeconds))
 	}
+	if oldCfg.QuotaForecast.Enabled != newCfg.QuotaForecast.Enabled {
+		changes = append(changes, fmt.Sprintf("quota-forecast.enabled: %t -> %t", oldCfg.QuotaForecast.Enabled, newCfg.QuotaForecast.Enabled))
+	}
+	if oldCfg.QuotaForecast.RetentionDays != newCfg.QuotaForecast.RetentionDays {
+		changes = append(changes, fmt.Sprintf("quota-forecast.retention-days: %d -> %d", oldCfg.QuotaForecast.RetentionDays, newCfg.QuotaForecast.RetentionDays))
+	}
+	if oldCfg.QuotaForecast.AlertLeadHours != newCfg.QuotaForecast.AlertLeadHours {
+		changes = append(changes, fmt.Sprintf("quota-forecast.alert-lead-hours: %d -> %d", oldCfg.QuotaForecast.AlertLeadHours, newCfg.QuotaForecast.AlertLeadHours))
+	}
+	if oldCfg.QuotaForecast.AlertWebhookURL != newCfg.QuotaForecast.AlertWebhookURL {
+		changes = append(changes, "quota-forecast.alert-webhook-url: changed")
+	}
 	if oldCfg.DisableClaudeCloakMode != newCfg.DisableClaudeCloakMode {
 		changes = append(changes, fmt.Sprintf("disable-claude-cloak-mode: %t -> %t", oldCfg.DisableClaudeCloakMode, newCfg.DisableClaudeCloakMode))
 	}

@@ -349,6 +349,22 @@ type QuotaExceeded struct {
 }
 
 // RoutingConfig configures how credentials are selected for requests.
+// QuotaForecastConfig controls quota history recording and the forecast built from it.
+type QuotaForecastConfig struct {
+	// Enabled turns on quota history recording, persisted to <auth-dir>/.quota-forecast.gz.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// RetentionDays bounds how long quota history and token usage are kept. Default 14, max 60.
+	RetentionDays int `yaml:"retention-days,omitempty" json:"retention-days,omitempty"`
+
+	// AlertLeadHours, when > 0, only alerts when a pool is projected to run out within
+	// this many hours. 0 alerts on any projected shortfall before the next reset.
+	AlertLeadHours int `yaml:"alert-lead-hours,omitempty" json:"alert-lead-hours,omitempty"`
+
+	// AlertWebhookURL receives a JSON POST when a pool is projected to run out before it resets.
+	AlertWebhookURL string `yaml:"alert-webhook-url,omitempty" json:"alert-webhook-url,omitempty"`
+}
+
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first", "soonest-reset".

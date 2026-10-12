@@ -56,6 +56,12 @@ func wrapRequestStopError(err error) error {
 	return requestStopError{error: unwrapRequestStopError(err)}
 }
 
+// RuntimeConfig returns the configuration snapshot the manager currently runs with.
+// Callers must treat it as read-only.
+func (m *Manager) RuntimeConfig() *internalconfig.Config {
+	return m.runtimeConfigSnapshot()
+}
+
 func (m *Manager) runtimeConfigSnapshot() *internalconfig.Config {
 	if m == nil {
 		return nil

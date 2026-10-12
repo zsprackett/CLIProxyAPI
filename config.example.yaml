@@ -728,6 +728,16 @@ oauth:
   # Value is in seconds; 0 or a negative value disables it (default). Example: 300 = every 5 minutes.
   # quota-poll-interval-seconds: 300
 
+  # Record OAuth quota history and serve pooled trend, burn-rate, runway, pace and
+  # token-attribution forecasts on the management quota page. History is kept in
+  # <auth-dir>/.quota-forecast.gz. Enable quota-poll-interval-seconds too so idle
+  # credentials keep reporting fresh numbers.
+  # quota-forecast:
+  #   enabled: true
+  #   retention-days: 14          # 1-60, default 14
+  #   alert-lead-hours: 0         # 0 = alert on any projected shortfall before reset
+  #   alert-webhook-url: ""       # optional JSON POST when a pool is projected to run out
+
   # Global OAuth model name aliases (per channel)
   # These aliases rename model IDs for both model listing and request routing.
   # Supported channels: vertex, aistudio, antigravity, claude, codex, kimi, xai, meta.
