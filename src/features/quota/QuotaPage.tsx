@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { authFilesApi } from '@/services/api';
+import { authFilesApi, QUOTA_FORECAST_PROVIDERS, type QuotaForecastProvider } from '@/services/api';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { IconSearch, IconX } from '@/components/ui/icons';
@@ -32,6 +32,7 @@ import { QuotaCard } from './components/QuotaCard';
 import { QuotaTimeline } from './components/QuotaTimeline';
 import { QuotaLedger, type LedgerItem } from './components/QuotaLedger';
 import { QuotaSummaryStrip } from './components/QuotaSummaryStrip';
+import { QuotaForecast } from './forecast/QuotaForecast';
 import {
   CARD_ENTRANCE_BUDGET_MS,
   QUOTA_FILES_REFRESH_MS,
@@ -262,6 +263,14 @@ export function QuotaPage() {
       return !prev;
     });
   }, []);
+
+  // Pooled forecasts exist for these providers only; the All tab shows every pool's summary.
+  const forecastProvider: QuotaForecastProvider | null | undefined =
+    tab === 'all'
+      ? null
+      : (QUOTA_FORECAST_PROVIDERS as readonly string[]).includes(tab)
+        ? (tab as QuotaForecastProvider)
+        : undefined;
 
   /* ---------- Ledger rows and provider totals ---------- */
 
@@ -536,6 +545,15 @@ export function QuotaPage() {
 
         {!loading && viewMode === 'ledger' && (
           <QuotaSummaryStrip summaries={summaries} resolvedTheme={resolvedTheme} nowMs={now} />
+        )}
+
+        {!loading && forecastProvider !== undefined && (tabCounts[tab] ?? 0) > 0 && (
+          <QuotaForecast
+            provider={forecastProvider}
+            nowMs={now}
+            showIdentities={showIdentities}
+            resolvedTheme={resolvedTheme}
+          />
         )}
 
         {loading ? (
