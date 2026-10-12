@@ -89,6 +89,10 @@ type Config struct {
 	// When <= 0, quota polling is disabled.
 	QuotaPollIntervalSeconds int `yaml:"quota-poll-interval-seconds" json:"quota-poll-interval-seconds"`
 
+	// QuotaForecast records observed quota history and serves trend, forecast,
+	// attribution and exhaustion alerts for pooled OAuth credentials.
+	QuotaForecast QuotaForecastConfig `yaml:"quota-forecast" json:"quota-forecast"`
+
 	// RequestRetry defines the number of additional credential retry rounds after
 	// the first round has exhausted its eligible credentials.
 	RequestRetry int `yaml:"request-retry" json:"request-retry"`
