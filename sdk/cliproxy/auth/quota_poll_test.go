@@ -117,3 +117,268 @@ func TestManager_QuotaPollTargetsAndObservation(t *testing.T) {
 		t.Fatalf("generation = %d, want > %d so the scheduler picks up the snapshot", after.Generation, before.Generation)
 	}
 }
+
+// pollingHook runs before PollQuota returns, to simulate traffic landing mid-poll.
+type pollingHook struct {
+	quotaPollingExecutor
+	before func()
+}
+
+func (e *pollingHook) PollQuota(ctx context.Context, auth *Auth) (http.Header, error) {
+	if e.before != nil {
+		e.before()
+	}
+	return e.quotaPollingExecutor.PollQuota(ctx, auth)
+}
+
+func claudePollHeaders(fiveHour, sevenDay string) http.Header {
+	h := http.Header{}
+	if fiveHour != "" {
+		h.Set("Anthropic-Ratelimit-Unified-5h-Utilization", fiveHour)
+		h.Set("Anthropic-Ratelimit-Unified-5h-Reset", "1787296800")
+	}
+	if sevenDay != "" {
+		h.Set("Anthropic-Ratelimit-Unified-7d-Utilization", sevenDay)
+		h.Set("Anthropic-Ratelimit-Unified-7d-Reset", "1787296800")
+	}
+	return h
+}
+
+func codexPollHeaders(limitReached string) http.Header {
+	h := http.Header{}
+	h.Set("X-Codex-Primary-Used-Percent", "20")
+	h.Set("X-Codex-Primary-Window-Minutes", "300")
+	h.Set("X-Codex-Secondary-Used-Percent", "40")
+	h.Set("X-Codex-Secondary-Window-Minutes", "10080")
+	if limitReached != "" {
+		h.Set("X-Codex-Limit-Reached", limitReached)
+	}
+	return h
+}
+
+// newBlockedPollManager registers a credential with sibling model states that
+// carry a credential_quota cooldown, as MarkResult produces for a scoped 429.
+func newBlockedPollManager(t *testing.T, provider string, exec ProviderExecutor, cfg *internalconfig.Config) *Manager {
+	t.Helper()
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.RegisterExecutor(exec)
+	if _, errRegister := manager.Register(WithSkipPersist(context.Background()), &Auth{
+		ID:       provider + "-blocked",
+		Provider: provider,
+		Status:   StatusActive,
+		ModelStates: map[string]*ModelState{
+			"model-a": {Status: StatusActive},
+			"model-b": {Status: StatusActive},
+		},
+	}); errRegister != nil {
+		t.Fatalf("register: %v", errRegister)
+	}
+	markCredentialQuota(manager, provider+"-blocked", provider)
+	// Stored after the cooldown exists: Home mode never records one itself, and
+	// SetConfig would clear it.
+	if cfg != nil {
+		manager.runtimeConfig.Store(cfg)
+	}
+	return manager
+}
+
+func markCredentialQuota(manager *Manager, authID, provider string) {
+	manager.MarkResult(context.Background(), Result{
+		AuthID:          authID,
+		Provider:        provider,
+		Model:           "model-a",
+		CredentialScope: true,
+		Error:           &Error{Code: "quota_exceeded", Message: "429", HTTPStatus: http.StatusTooManyRequests},
+	})
+}
+
+func pollOnce(t *testing.T, manager *Manager, authID string) {
+	t.Helper()
+	for _, target := range manager.quotaPollTargets() {
+		if target.auth.ID == authID {
+			manager.pollQuotaOnce(context.Background(), target)
+			return
+		}
+	}
+	t.Fatalf("no poll target for %s", authID)
+}
+
+func assertBlocked(t *testing.T, manager *Manager, authID string, want bool) {
+	t.Helper()
+	got, _ := manager.GetByID(authID)
+	if got == nil {
+		t.Fatalf("auth %s missing", authID)
+	}
+	if blocked := hasActiveQuotaCooldown(got, time.Now()); blocked != want {
+		t.Fatalf("active quota cooldown = %t, want %t (auth %#v)", blocked, want, got.Quota)
+	}
+	if !want {
+		if got.Unavailable {
+			t.Fatal("auth still Unavailable after clear")
+		}
+		for model, state := range got.ModelStates {
+			if state != nil && state.Quota.Exceeded {
+				t.Fatalf("model %s still Quota.Exceeded", model)
+			}
+		}
+	}
+}
+
+func TestQuotaPollClearsClaudeCooldownWhenCapacityShown(t *testing.T) {
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5")}
+	manager := newBlockedPollManager(t, "claude", exec, nil)
+	assertBlocked(t, manager, "claude-blocked", true)
+	pollOnce(t, manager, "claude-blocked")
+	assertBlocked(t, manager, "claude-blocked", false)
+	// A second poll finds nothing to clear.
+	pollOnce(t, manager, "claude-blocked")
+	assertBlocked(t, manager, "claude-blocked", false)
+}
+
+func TestQuotaPollKeepsClaudeCooldownWhenWindowFull(t *testing.T) {
+	for name, headers := range map[string]http.Header{
+		"7d full":    claudePollHeaders("0.3", "1.0"),
+		"7d missing": claudePollHeaders("0.3", ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			exec := &quotaPollingExecutor{id: "claude", headers: headers}
+			manager := newBlockedPollManager(t, "claude", exec, nil)
+			pollOnce(t, manager, "claude-blocked")
+			assertBlocked(t, manager, "claude-blocked", true)
+		})
+	}
+}
+
+func TestQuotaPollKeepsCooldownWhenFailureLandsMidPoll(t *testing.T) {
+	exec := &pollingHook{quotaPollingExecutor: quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5")}}
+	manager := newBlockedPollManager(t, "claude", exec, nil)
+	exec.before = func() { markCredentialQuota(manager, "claude-blocked", "claude") }
+	pollOnce(t, manager, "claude-blocked")
+	assertBlocked(t, manager, "claude-blocked", true)
+}
+
+func TestQuotaPollLeavesNonQuotaBlockUntouched(t *testing.T) {
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5")}
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.RegisterExecutor(exec)
+	next := time.Now().Add(time.Hour)
+	if _, errRegister := manager.Register(WithSkipPersist(context.Background()), &Auth{
+		ID:       "claude-401",
+		Provider: "claude",
+		Status:   StatusActive,
+		ModelStates: map[string]*ModelState{
+			"model-a": {Status: StatusError, Unavailable: true, NextRetryAfter: next},
+		},
+	}); errRegister != nil {
+		t.Fatalf("register: %v", errRegister)
+	}
+	pollOnce(t, manager, "claude-401")
+	got, _ := manager.GetByID("claude-401")
+	state := got.ModelStates["model-a"]
+	if !state.Unavailable || !state.NextRetryAfter.Equal(next) {
+		t.Fatalf("401 block changed: %#v", state)
+	}
+}
+
+func TestQuotaPollDoesNotClearWhenHomeEnabled(t *testing.T) {
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5")}
+	cfg := &internalconfig.Config{}
+	cfg.Home.Enabled = true
+	manager := newBlockedPollManager(t, "claude", exec, cfg)
+	pollOnce(t, manager, "claude-blocked")
+	assertBlocked(t, manager, "claude-blocked", true)
+}
+
+func TestQuotaPollClearsCodexCooldown(t *testing.T) {
+	for name, tc := range map[string]struct {
+		limitReached string
+		wantBlocked  bool
+	}{
+		"capacity":      {"", false},
+		"limit reached": {"true", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			exec := &quotaPollingExecutor{id: "codex", headers: codexPollHeaders(tc.limitReached)}
+			manager := newBlockedPollManager(t, "codex", exec, nil)
+			pollOnce(t, manager, "codex-blocked")
+			assertBlocked(t, manager, "codex-blocked", tc.wantBlocked)
+		})
+	}
+}
+
+func TestQuotaPollDoesNotClearXAICooldown(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Xai-Billing-Used-Percent", "10")
+	exec := &quotaPollingExecutor{id: "xai", headers: h}
+	manager := newBlockedPollManager(t, "xai", exec, nil)
+	pollOnce(t, manager, "xai-blocked")
+	assertBlocked(t, manager, "xai-blocked", true)
+}
+
+func TestPollShowsQuotaCapacity(t *testing.T) {
+	observe := func(provider string, h http.Header) QuotaState {
+		var q QuotaState
+		q.ObserveResponseHeadersForProvider(provider, h, time.Now())
+		return q
+	}
+	codexWith := func(key, value string) http.Header {
+		h := codexPollHeaders("")
+		h.Set(key, value)
+		return h
+	}
+	cases := []struct {
+		name     string
+		provider string
+		headers  http.Header
+		want     bool
+	}{
+		{"claude both below", "claude", claudePollHeaders("0.3", "0.5"), true},
+		{"claude 5h full", "claude", claudePollHeaders("1.0", "0.5"), false},
+		{"claude 7d full", "claude", claudePollHeaders("0.3", "1.0"), false},
+		{"claude 5h missing", "claude", claudePollHeaders("", "0.5"), false},
+		{"claude 7d missing", "claude", claudePollHeaders("0.3", ""), false},
+		{"claude no headers", "claude", http.Header{}, false},
+		{"codex below", "codex", codexPollHeaders(""), true},
+		{"codex limit reached", "codex", codexPollHeaders("true"), false},
+		{"codex limit reached mixed case", "codex", codexWith("X-Codex-Limit-Reached", "True"), false},
+		{"codex limit not reached", "codex", codexWith("X-Codex-Limit-Reached", "false"), true},
+		{"codex not allowed", "codex", codexWith("X-Codex-Allowed", "false"), false},
+		{"codex allowed", "codex", codexWith("X-Codex-Allowed", "true"), true},
+		{"codex window full", "codex", codexWith("X-Codex-Secondary-Used-Percent", "100"), false},
+		{"codex no windows", "codex", http.Header{"X-Codex-Primary-Used-Percent": []string{"5"}}, false},
+		{"xai", "xai", http.Header{"X-Xai-Billing-Used-Percent": []string{"10"}}, false},
+		{"unknown provider", "gemini", codexPollHeaders(""), false},
+	}
+	for _, tc := range cases {
+		if got := pollShowsQuotaCapacity(tc.provider, observe(tc.provider, tc.headers)); got != tc.want {
+			t.Errorf("%s: pollShowsQuotaCapacity = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestHasActiveQuotaCooldown(t *testing.T) {
+	now := time.Now()
+	future, past := now.Add(time.Hour), now.Add(-time.Hour)
+	quota := func(reason string, next time.Time) QuotaState {
+		return QuotaState{Exceeded: true, Reason: reason, NextRecoverAt: next}
+	}
+	cases := []struct {
+		name string
+		auth *Auth
+		want bool
+	}{
+		{"nil", nil, false},
+		{"auth credential_quota", &Auth{Quota: quota("credential_quota", future)}, true},
+		{"auth quota", &Auth{Quota: quota("quota", future)}, true},
+		{"expired", &Auth{Quota: quota("quota", past)}, false},
+		{"cloudflare", &Auth{Quota: quota("cloudflare", future)}, false},
+		{"not exceeded", &Auth{Quota: QuotaState{Reason: "quota", NextRecoverAt: future}}, false},
+		{"model state", &Auth{ModelStates: map[string]*ModelState{"nil": nil, "m": {Quota: quota("quota", future)}}}, true},
+		{"model state cloudflare", &Auth{ModelStates: map[string]*ModelState{"m": {Quota: quota("cloudflare", future)}}}, false},
+	}
+	for _, tc := range cases {
+		if got := hasActiveQuotaCooldown(tc.auth, now); got != tc.want {
+			t.Errorf("%s: hasActiveQuotaCooldown = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+}

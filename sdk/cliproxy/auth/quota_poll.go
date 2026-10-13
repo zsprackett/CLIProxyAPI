@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -125,6 +126,8 @@ func (m *Manager) runQuotaPoll(ctx context.Context) {
 }
 
 func (m *Manager) pollQuotaOnce(ctx context.Context, target quotaPollTarget) {
+	pollStart := time.Now()
+	baseline := m.cooldownStateRecordsForAuthLocked(target.auth, pollStart)
 	headers, errPoll := target.poller.PollQuota(ctx, target.auth)
 	if errPoll != nil {
 		if ctx.Err() == nil {
@@ -135,7 +138,40 @@ func (m *Manager) pollQuotaOnce(ctx context.Context, target quotaPollTarget) {
 	if len(headers) == 0 {
 		return
 	}
-	m.observePolledQuota(target.auth.ID, headers, time.Now())
+	now := time.Now()
+	m.observePolledQuota(target.auth.ID, headers, now)
+	m.clearCooldownIfPollShowsCapacity(ctx, target.auth, headers, pollStart, baseline, now)
+}
+
+// clearCooldownIfPollShowsCapacity lifts a quota cooldown once the polled usage
+// shows room. The guard compares cooldown records with the pre-poll baseline
+// under m.mu, so a failure that landed while the poll was in flight keeps its
+// block; the next poll retries.
+func (m *Manager) clearCooldownIfPollShowsCapacity(ctx context.Context, target *Auth, headers http.Header, pollStart time.Time, baseline []CooldownStateRecord, now time.Time) {
+	if m.HomeEnabled() {
+		return
+	}
+	var polled QuotaState
+	if !polled.ObserveResponseHeadersForProvider(target.Provider, headers, now) || !pollShowsQuotaCapacity(target.Provider, polled) {
+		return
+	}
+	guard := func(auth *Auth) bool {
+		return hasActiveQuotaCooldown(auth, now) &&
+			cooldownRecordsUnchanged(baseline, m.cooldownStateRecordsForAuthLocked(auth, pollStart))
+	}
+	cleared, _, errReset := m.resetQuota(ctx, target.ID, guard)
+	if errReset != nil {
+		log.WithFields(log.Fields{"auth_id": target.ID, "provider": target.Provider}).Warnf("quota poll cooldown clear failed: %v", errReset)
+		return
+	}
+	if cleared == nil {
+		return
+	}
+	fields := log.Fields{"auth_id": target.ID, "provider": target.Provider}
+	for _, window := range quotaWindowsFromSnapshot(strings.ToLower(strings.TrimSpace(target.Provider)), polled, false) {
+		fields["used_percent_"+window.Class] = window.UsedPercent
+	}
+	log.WithFields(fields).Info("quota poll shows capacity; cleared quota cooldown")
 }
 
 // observePolledQuota records polled quota headers as the credential-level
