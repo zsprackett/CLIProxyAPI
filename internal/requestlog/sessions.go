@@ -110,9 +110,7 @@ func (t *tracker) setLaneLocked(sess *session, l lane) {
 		sess.lanes = sess.lanes[:maxLanes-1]
 	}
 	t.hashes += l.print.Size()
-	sess.lanes = append(sess.lanes, lane{})
-	copy(sess.lanes[1:], sess.lanes)
-	sess.lanes[0] = l
+	sess.lanes = append([]lane{l}, sess.lanes...)
 }
 
 // baseline returns the same-model lane when present (sameModel=true), otherwise
