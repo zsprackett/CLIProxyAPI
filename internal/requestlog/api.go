@@ -1,6 +1,12 @@
 package requestlog
 
-import "time"
+import (
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
+)
 
 // ---------------------------------------------------------------------------
 // GET /v8/management/observability/requests
@@ -15,8 +21,8 @@ type Filter struct {
 	Model   string    // exact upstream model                     ?model=
 	Status  string    // "ok" | "failed" | "<http code>"          ?status=
 	Verdict string    // csv of hit,partial,miss,cold,na          ?verdict=
-	From    time.Time // RequestedAt >= From                   ?from=  (RFC3339 or unix ms)
-	To      time.Time // RequestedAt <  To                     ?to=
+	From    time.Time // RequestedAt >= From                      ?from=  (RFC3339 or unix ms)
+	To      time.Time // RequestedAt <  To                        ?to=
 
 	// Since is the live-refresh cursor: only entries with seq > Since.
 	// The client sends back Page.Cursor from its previous response.   ?since=
@@ -195,7 +201,7 @@ type SessionPage struct {
 //	  "auth_ids": ["claude-max-1.json"],
 //	  "verdicts": {"hit": 190, "partial": 6, "miss": 4, "cold": 1, "na": 13},
 //	  "tokens": {"input": 4210, "cache_read": 15100000, "cache_write": 410000, "output": 92000, "reasoning": 0, "prompt": 15514210},
-//	  "hit_ratio": 0.973,                  // cache_read / prompt over judged entries
+//	  "hit_ratio": 0.973,                  // cache_read / prompt over judged (hit, partial, miss) entries
 //	  "lost_tokens": 312000,               // sum of lost over partial+miss
 //	  "causes": {"idle_gap": 3, "message_changed": 5, "tools_changed": 2},
 //	  "top_cause": "message_changed",
@@ -235,4 +241,104 @@ type MissRef struct {
 	At      time.Time   `json:"at"`
 	Cause   string      `json:"cause"`
 	Segment *SegmentRef `json:"segment,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Rendering: the hidden row and Verdict types become the JSON views above.
+// ---------------------------------------------------------------------------
+
+var verdictNames = [...]string{VerdictNA: "na", VerdictCold: "cold", VerdictHit: "hit", VerdictPartial: "partial", VerdictMiss: "miss"}
+
+var naNames = [...]string{NANone: "", NAFailed: "failed", NANoUsage: "no_usage", NANoSession: "no_session", NAUnsupported: "unsupported", NABelowMinimum: "below_minimum", NAConcurrent: "concurrent"}
+
+var causeNames = [...]string{
+	CauseNone: "", CauseCredential: "credential_changed", CauseModel: "model_changed", CauseTools: "tools_changed",
+	CauseSystem: "system_changed", CauseSettings: "settings_changed", CauseMessage: "message_changed",
+	CauseInstructions: "instructions_changed", CauseTruncated: "history_truncated", CauseIdle: "idle_gap",
+	CauseCacheKey: "cache_key_changed", CauseLookback: "lookback_exceeded", CauseNoBreakpoint: "no_breakpoint",
+	CauseVolatile: "volatile_changed", CauseUnexplained: "unexplained",
+}
+
+var confidenceNames = [...]string{ConfidenceNone: "", ConfidenceHigh: "high", ConfidenceLow: "low"}
+
+var segmentKindNames = [...]string{prompt.SegmentNone: "", prompt.SegmentTools: "tools", prompt.SegmentSystem: "system", prompt.SegmentSettings: "settings", prompt.SegmentMessage: "message", prompt.SegmentInstructions: "instructions", prompt.SegmentInput: "input"}
+
+// parseVerdictKind maps a ?verdict= token to its kind.
+func parseVerdictKind(name string) (VerdictKind, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for kind, known := range verdictNames {
+		if known == name {
+			return VerdictKind(kind), true
+		}
+	}
+	return 0, false
+}
+
+func entryOf(r *row) Entry {
+	e := Entry{
+		Seq:       r.seq,
+		TraceID:   r.traceID,
+		At:        time.UnixMilli(r.atMs).UTC(),
+		SessionID: r.sessionID,
+		KeyHash:   r.keyHash,
+		AuthID:    r.authID,
+		Provider:  r.provider,
+		Model:     r.model,
+		Agent:     r.agent,
+		Stream:    r.flags&rowStream != 0,
+		Status:    int(r.status),
+		Failed:    r.flags&rowFailed != 0,
+		Error:     r.errText,
+		LatencyMs: r.latencyMs,
+		TTFTMs:    r.ttftMs,
+		Tokens: Tokens{
+			Input:      r.uncached,
+			CacheRead:  r.read,
+			CacheWrite: r.write,
+			Output:     r.output,
+			Reasoning:  r.reasoning,
+			Prompt:     clampU32(int64(r.uncached) + int64(r.read) + int64(r.write)),
+		},
+		Cache: cacheOf(r.verdict, r.read),
+	}
+	if r.requestID != [16]byte{} {
+		e.RequestID = uuid.UUID(r.requestID).String()
+	}
+	return e
+}
+
+func cacheOf(v Verdict, read uint32) Cache {
+	c := Cache{Verdict: verdictNames[v.Kind]}
+	switch v.Kind {
+	case VerdictNA:
+		c.Reason = naNames[v.NA]
+	case VerdictHit:
+		c.Expected, c.GapSec, c.TTLSec = v.Expected, v.GapSec, v.TTLSec
+	case VerdictPartial, VerdictMiss:
+		c.Cause = causeNames[v.Primary]
+		c.Confidence = confidenceNames[v.Confidence]
+		for cause := CauseCredential; cause <= CauseUnexplained; cause++ {
+			if v.Causes.Has(cause) {
+				c.Causes = append(c.Causes, causeNames[cause])
+			}
+		}
+		c.Segment = segmentOf(v)
+		if v.Causes.Has(CauseTools) {
+			c.Tools = &ToolsDelta{From: int(v.ToolsFrom), To: int(v.ToolsTo)}
+		}
+		c.Expected, c.GapSec, c.TTLSec = v.Expected, v.GapSec, v.TTLSec
+		c.Lost = clampU32(int64(v.Expected) - int64(read))
+	}
+	return c
+}
+
+func segmentOf(v Verdict) *SegmentRef {
+	if v.Causes&bodyCauses == 0 {
+		return nil
+	}
+	ref := v.Segment.unpack()
+	if ref.Kind == prompt.SegmentNone {
+		return nil
+	}
+	return &SegmentRef{Kind: segmentKindNames[ref.Kind], Index: ref.Index}
 }
