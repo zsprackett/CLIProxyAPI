@@ -405,7 +405,10 @@ type sessionAgg struct {
 
 func (a *sessionAgg) add(r *row) {
 	a.requests++
-	a.firstMs = r.atMs
+	// Rows arrive in publish order, which differs from request start order when
+	// a long request finishes after a later short one.
+	a.firstMs = min(a.firstMs, r.atMs)
+	a.lastMs = max(a.lastMs, r.atMs)
 	if r.flags&rowFailed != 0 {
 		a.failed++
 	}
@@ -510,7 +513,7 @@ func (s *Service) Sessions(f SessionFilter) SessionPage {
 		}
 		a := aggs[r.sessionID]
 		if a == nil {
-			a = &sessionAgg{id: r.sessionID, keyHash: r.keyHash, agent: r.agent, lastMs: r.atMs,
+			a = &sessionAgg{id: r.sessionID, keyHash: r.keyHash, agent: r.agent, firstMs: r.atMs, lastMs: r.atMs,
 				models: make(map[string]bool, 2), auths: make(map[string]bool, 2), keys: make(map[string]bool, 1), causes: make(map[Cause]int)}
 			aggs[r.sessionID] = a
 			order = append(order, a)
@@ -518,6 +521,7 @@ func (s *Service) Sessions(f SessionFilter) SessionPage {
 		a.add(r)
 		return true
 	})
+	sort.SliceStable(order, func(i, j int) bool { return order[i].lastMs > order[j].lastMs })
 	sessions := make([]Session, 0, min(len(order), limit))
 	present := make(map[string]bool, 4)
 	for _, a := range order {

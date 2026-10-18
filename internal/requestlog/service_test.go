@@ -305,3 +305,33 @@ func TestServiceConfigClamps(t *testing.T) {
 		t.Fatal("nil config must use the defaults")
 	}
 }
+
+// Publish order (seq) differs from request start order (at) whenever a long
+// request finishes after a later short one. Session bounds and order follow at.
+func TestSessionsOrderAndBoundsFollowRequestTime(t *testing.T) {
+	defer prompt.SetCaptureEnabled(false)
+	s, manager := testService(testConfig(t, true))
+	s.Start(context.Background(), manager)
+	defer s.Stop(context.Background())
+	p := claudePrintOf(claudeOpts{messages: []string{"one"}})
+	s.HandleUsage(recordCtx(p), claudeRecord("A", "opus", "a", t0.Add(100*time.Second), 10, 0, 5000))
+	s.HandleUsage(recordCtx(p), claudeRecord("B", "opus", "a", t0.Add(50*time.Second), 10, 0, 5000))
+	s.HandleUsage(recordCtx(p), claudeRecord("A", "opus", "a", t0.Add(20*time.Second), 10, 0, 5000))
+	s.HandleUsage(recordCtx(p), claudeRecord("C", "opus", "a", t0.Add(30*time.Second), 10, 0, 5000))
+
+	page := s.Sessions(SessionFilter{})
+	var got []string
+	for _, sess := range page.Sessions {
+		got = append(got, sess.SessionID)
+	}
+	if len(got) != 3 || got[0] != "A" || got[1] != "B" || got[2] != "C" {
+		t.Fatalf("order = %v, want [A B C] by last request time", got)
+	}
+	a := page.Sessions[0]
+	if !a.LastAt.Equal(t0.Add(100*time.Second)) || !a.FirstAt.Equal(t0.Add(20*time.Second)) {
+		t.Fatalf("A bounds = %v .. %v", a.FirstAt, a.LastAt)
+	}
+	if limited := s.Sessions(SessionFilter{Limit: 1}); len(limited.Sessions) != 1 || limited.Sessions[0].SessionID != "A" {
+		t.Fatalf("limit must keep the most recent session, got %+v", limited.Sessions)
+	}
+}
