@@ -27,7 +27,6 @@ package requestlog
 
 import (
 	"context"
-	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -257,12 +256,15 @@ func (s *Service) Query(f Filter) Page {
 		return Page{Reason: s.disabledReason(), Keys: map[string]string{}, Entries: []Entry{}}
 	}
 	limit := clampInt(f.Limit, defaultQueryLimit, 1, maxQueryLimit)
-	lo, hi := uint64(0), uint64(math.MaxUint64)
+	// Read the cursor before scanning: a row appended during the scan has a seq
+	// above this cursor and arrives on the next poll instead of being skipped.
+	oldest, newest, epoch := s.ring.bounds()
+	lo, hi := uint64(0), newest
 	if f.Since > 0 {
 		lo = f.Since + 1
 	}
 	if f.Before > 0 {
-		hi = f.Before - 1
+		hi = min(hi, f.Before-1)
 	}
 	m := newRowMatcher(f)
 	entries := []Entry{}
@@ -280,7 +282,6 @@ func (s *Service) Query(f Filter) Page {
 		entries = append(entries, entryOf(r))
 		return true
 	})
-	oldest, newest, epoch := s.ring.bounds()
 	keys := make(map[string]bool, 4)
 	for i := range entries {
 		keys[entries[i].KeyHash] = true
@@ -500,9 +501,10 @@ func (s *Service) Sessions(f SessionFilter) SessionPage {
 	if !f.To.IsZero() {
 		toMs = f.To.UnixMilli()
 	}
+	_, newest, epoch := s.ring.bounds()
 	aggs := make(map[string]*sessionAgg)
 	order := make([]*sessionAgg, 0, 64)
-	s.ring.scan(0, math.MaxUint64, false, func(r *row) bool {
+	s.ring.scan(0, newest, false, func(r *row) bool {
 		if r.sessionID == "" || (fromMs != 0 && r.atMs < fromMs) || (toMs != 0 && r.atMs >= toMs) {
 			return true
 		}
@@ -528,7 +530,6 @@ func (s *Service) Sessions(f SessionFilter) SessionPage {
 		sessions = append(sessions, a.view())
 		present[a.keyHash] = true
 	}
-	_, newest, epoch := s.ring.bounds()
 	return SessionPage{Enabled: true, Epoch: epoch, Cursor: newest, Keys: maskedKeys(cfg, present), Sessions: sessions}
 }
 
