@@ -38,7 +38,7 @@ type Cause uint8
 const (
 	CauseNone         Cause = iota
 	CauseCredential         // auth changed: Anthropic/OpenAI caches are per organization/account
-	CauseModel              // no same-model baseline in this session; judged against the session's last model
+	CauseModel              // only on Cold: first request on this model while the session is warm on another
 	CauseTools              // tools array changed (Divergence.At.Kind == SegmentTools)
 	CauseSystem             // system block i changed
 	CauseSettings           // tool_choice or thinking changed (Claude: invalidates the message cache)
@@ -206,11 +206,17 @@ func judge(obs observation, sess *session) (Verdict, *laneUpdate) {
 	case obs.sessionID == "":
 		return notApplicable(NANoSession), nil
 	}
-	base, sameModel := sess.baseline(obs.model)
+	base := sess.baseline(obs.model)
 	ttl, _ := obs.print.TTL()
 	upd := &laneUpdate{model: obs.model, authID: obs.authID, touchedAt: obs.touchedAt, cachedPrefix: cachedPrefix(obs), ttl: ttl, print: obs.print}
 	if base == nil {
-		return Verdict{Kind: VerdictCold}, upd
+		v := Verdict{Kind: VerdictCold}
+		if sess != nil && len(sess.lanes) > 0 {
+			// The session is warm on another model, whose cache this model cannot read.
+			v.Primary, v.Confidence = CauseModel, ConfidenceHigh
+			v.Causes.Add(CauseModel)
+		}
+		return v, upd
 	}
 	if base.touchedAt.After(obs.requestedAt) {
 		return notApplicable(NAConcurrent), nil
@@ -246,9 +252,6 @@ func judge(obs observation, sess *session) (Verdict, *laneUpdate) {
 	var causes CauseSet
 	if base.authID != obs.authID {
 		causes.Add(CauseCredential)
-	}
-	if !sameModel {
-		causes.Add(CauseModel)
 	}
 	switch div.Kind {
 	case prompt.Changed:

@@ -312,6 +312,10 @@ func cacheOf(v Verdict, read uint32) Cache {
 	switch v.Kind {
 	case VerdictNA:
 		c.Reason = naNames[v.NA]
+	case VerdictCold:
+		if v.Primary != CauseNone {
+			c.Cause = causeNames[v.Primary]
+		}
 	case VerdictHit:
 		c.Expected, c.GapSec, c.TTLSec = v.Expected, v.GapSec, v.TTLSec
 	case VerdictPartial, VerdictMiss:

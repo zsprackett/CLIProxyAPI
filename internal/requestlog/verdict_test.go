@@ -109,6 +109,27 @@ func TestJudgeColdSetsBaseline(t *testing.T) {
 	}
 }
 
+// Prompt caches are per model, so a model can never read another model's
+// prefix. The first request on a new model in a session is cold, tagged with
+// model_changed, and never reports tokens "lost" against another model's lane.
+func TestJudgeNewModelIsCold(t *testing.T) {
+	p := claudePrintOf(claudeOpts{messages: []string{"one", "two"}})
+	sess := &session{id: "s", lanes: []lane{laneAt("opus", "a", t0, 250000, 5*time.Minute, p)}}
+	v, upd := judge(obsAt(t0.Add(30*time.Second), "s", "sonnet", "a", 90, 117000, 124, p), sess)
+	if v.Kind != VerdictCold || v.Primary != CauseModel || !v.Causes.Has(CauseModel) || v.Expected != 0 {
+		t.Fatalf("first sonnet after opus = %+v", v)
+	}
+	if upd == nil || upd.model != "sonnet" {
+		t.Fatalf("new model must start its own lane, got %+v", upd)
+	}
+	if c := cacheOf(v, 117000); c.Verdict != "cold" || c.Cause != "model_changed" || c.Lost != 0 || c.Expected != 0 {
+		t.Fatalf("rendered = %+v", c)
+	}
+	if c := cacheOf(Verdict{Kind: VerdictCold}, 0); c.Cause != "" {
+		t.Fatalf("a session's first request carries no cause, got %+v", c)
+	}
+}
+
 func TestJudgeHitPartialMissThresholds(t *testing.T) {
 	claude := claudePrintOf(claudeOpts{messages: []string{"hi"}})
 	codex := codexPrintOf(codexOpts{input: []string{testInA}})
@@ -171,12 +192,6 @@ func TestJudgeCauses(t *testing.T) {
 			obs:    obsAt(late, "s", "opus", "b", 100, 0, 0, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseCredential, CauseTools, CauseIdle}, segment: prompt.SegmentRef{Kind: prompt.SegmentTools}, tools: [2]uint16{1, 2},
-		},
-		{
-			name: "model lane missing", kind: VerdictMiss, primary: CauseModel, confidence: ConfidenceHigh,
-			obs:    obsAt(soon, "s", "haiku", "a", 100, 0, 0, base),
-			sess:   claudeLane("a", t0, 5*time.Minute),
-			causes: []Cause{CauseModel},
 		},
 		{
 			name: "idle beats tools on a miss", kind: VerdictMiss, primary: CauseIdle, confidence: ConfidenceHigh,
@@ -299,15 +314,15 @@ func TestJudgeCauses(t *testing.T) {
 
 func TestSessionBaseline(t *testing.T) {
 	var none *session
-	if base, _ := none.baseline("opus"); base != nil {
+	if base := none.baseline("opus"); base != nil {
 		t.Fatal("nil session must have no baseline")
 	}
 	p := claudePrintOf(claudeOpts{messages: []string{"hi"}})
 	sess := &session{id: "s", lanes: []lane{laneAt("haiku", "a", t0.Add(time.Minute), 1, 0, p), laneAt("opus", "a", t0, 2, 0, p)}}
-	if base, same := sess.baseline("opus"); base == nil || !same || base.cachedPrefix != 2 {
-		t.Fatalf("same-model lane = %+v same=%v", base, same)
+	if base := sess.baseline("opus"); base == nil || base.cachedPrefix != 2 {
+		t.Fatalf("same-model lane = %+v", base)
 	}
-	if base, same := sess.baseline("sonnet"); base == nil || same || base.model != "haiku" {
-		t.Fatalf("fallback must be the most recently touched lane, got %+v same=%v", base, same)
+	if base := sess.baseline("sonnet"); base != nil {
+		t.Fatalf("another model's lane is never a baseline, got %+v", base)
 	}
 }

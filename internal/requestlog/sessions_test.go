@@ -11,9 +11,9 @@ func TestTrackerLanesPerModel(t *testing.T) {
 	if v := tr.observe(obsAt(t0, "s", "opus", "a", 100, 0, 5000, p)); v.Kind != VerdictCold {
 		t.Fatalf("first opus = %+v", v)
 	}
-	// A helper model in the same session is judged against the opus lane and
-	// gets its own lane; the opus baseline stays warm.
-	if v := tr.observe(obsAt(t0.Add(time.Second*2), "s", "haiku", "a", 100, 0, 0, p)); v.Kind != VerdictMiss || v.Primary != CauseModel {
+	// A helper model in the same session cannot read the opus cache: it is cold
+	// (model_changed) and gets its own lane; the opus baseline stays warm.
+	if v := tr.observe(obsAt(t0.Add(time.Second*2), "s", "haiku", "a", 100, 0, 0, p)); v.Kind != VerdictCold || v.Primary != CauseModel {
 		t.Fatalf("first haiku = %+v", v)
 	}
 	if v := tr.observe(obsAt(t0.Add(time.Second*4), "s", "opus", "a", 10, 5000, 0, p)); v.Kind != VerdictHit {

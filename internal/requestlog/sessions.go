@@ -113,19 +113,18 @@ func (t *tracker) setLaneLocked(sess *session, l lane) {
 	sess.lanes = append([]lane{l}, sess.lanes...)
 }
 
-// baseline returns the same-model lane when present (sameModel=true), otherwise
-// the most recently touched lane of any model (sameModel=false), or nil.
-// A nil *session returns nil.
-func (s *session) baseline(model string) (base *lane, sameModel bool) {
-	if s == nil || len(s.lanes) == 0 {
-		return nil, false
+// baseline returns the lane for model, or nil. Prompt caches are per model, so
+// another model's lane is never a baseline. A nil *session returns nil.
+func (s *session) baseline(model string) *lane {
+	if s == nil {
+		return nil
 	}
 	for i := range s.lanes {
 		if s.lanes[i].model == model {
-			return &s.lanes[i], true
+			return &s.lanes[i]
 		}
 	}
-	return &s.lanes[0], false
+	return nil
 }
 
 // evictLocked drops least-recently-observed sessions while
