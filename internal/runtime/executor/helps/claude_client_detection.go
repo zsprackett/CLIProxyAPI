@@ -29,7 +29,8 @@ const (
 var (
 	claudeCodeUserAgentPattern        = regexp.MustCompile(`(?i)^claude-cli/`)
 	claudeCodeUserAgentDetailsPattern = regexp.MustCompile(`(?i)^claude-cli/\S+\s+\(external,\s*([^,)]+)(?:,\s*agent-sdk/([^,)]+))?`)
-	claudeCodeNativeUserAgentPattern  = regexp.MustCompile(`(?i)^claude-cli/[0-9]+\.[0-9]+\.[0-9]+\s+\(external,\s*[^,)]+(?:,\s*agent-sdk/[0-9]+\.[0-9]+\.[0-9]+)?\)$`)
+	// Claude Code appends ", workload/<name>" to turns fired by a scheduled task, for example workload/cron.
+	claudeCodeNativeUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/[0-9]+\.[0-9]+\.[0-9]+\s+\(external,\s*[^,)]+(?:,\s*agent-sdk/[0-9]+\.[0-9]+\.[0-9]+)?(?:,\s*workload/[a-z0-9_-]+)?\)$`)
 )
 
 var claudeCodeSubclientByEntrypoint = map[string]string{
