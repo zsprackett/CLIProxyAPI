@@ -1,0 +1,105 @@
+@use '../../styles/mixins' as *;
+
+.table {
+  min-width: 1080px;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.nowrap {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ellipsis {
+  max-width: 200px;
+  @include text-ellipsis;
+}
+
+.muted {
+  color: var(--text-tertiary);
+}
+
+.ok {
+  color: var(--viz-success);
+  font-weight: 600;
+}
+
+.failed {
+  color: var(--viz-failure);
+  font-weight: 600;
+  cursor: help;
+}
+
+.sessionLink {
+  @include button-reset;
+
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-hover);
+  text-underline-offset: 3px;
+
+  &:hover {
+    text-decoration-color: currentColor;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
+/* input / cache read / cache write / output, separated by thin slashes. */
+.tokens {
+  display: inline-flex;
+  gap: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+
+  > span + span::before {
+    content: '/';
+    margin: 0 5px;
+    color: var(--text-quaternary);
+  }
+}
+
+.read {
+  color: var(--viz-success);
+}
+
+.write {
+  color: var(--text-primary);
+}
+
+.detailRow {
+  background: var(--bg-secondary);
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 24px;
+  margin: 0;
+  padding: 4px 0;
+
+  dt {
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+  }
+
+  dd {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+  }
+}
+
+.clickableRow {
+  cursor: pointer;
+}

@@ -22,6 +22,7 @@ import {
   IconSidebarConfig,
   IconSidebarDashboard,
   IconSidebarLogs,
+  IconSidebarRequests,
   IconSidebarOauth,
   IconSidebarPlugins,
   IconSidebarProviders,
@@ -64,6 +65,7 @@ const sidebarIcons: Record<string, ReactNode> = {
   pluginStore: <IconSidebarStore size={18} />,
   config: <IconSidebarConfig size={18} />,
   logs: <IconSidebarLogs size={18} />,
+  requests: <IconSidebarRequests size={18} />,
   system: <IconSidebarSystem size={18} />,
 };
 
@@ -645,6 +647,12 @@ export function MainLayout() {
           labelKey: 'nav.quota_management',
           metaKey: 'nav_meta.quota_management',
           icon: sidebarIcons.quota,
+        },
+        {
+          path: '/requests',
+          labelKey: 'nav.requests',
+          metaKey: 'nav_meta.requests',
+          icon: sidebarIcons.requests,
         },
         {
           path: '/logs',
