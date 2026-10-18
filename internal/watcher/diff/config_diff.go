@@ -70,6 +70,18 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.QuotaForecast.AlertWebhookURL != newCfg.QuotaForecast.AlertWebhookURL {
 		changes = append(changes, "quota-forecast.alert-webhook-url: changed")
 	}
+	if oldCfg.RequestHistory.Enabled != newCfg.RequestHistory.Enabled {
+		changes = append(changes, fmt.Sprintf("request-history.enabled: %t -> %t", oldCfg.RequestHistory.Enabled, newCfg.RequestHistory.Enabled))
+	}
+	if oldCfg.RequestHistory.MaxEntries != newCfg.RequestHistory.MaxEntries {
+		changes = append(changes, fmt.Sprintf("request-history.max-entries: %d -> %d", oldCfg.RequestHistory.MaxEntries, newCfg.RequestHistory.MaxEntries))
+	}
+	if oldCfg.RequestHistory.RetentionDays != newCfg.RequestHistory.RetentionDays {
+		changes = append(changes, fmt.Sprintf("request-history.retention-days: %d -> %d", oldCfg.RequestHistory.RetentionDays, newCfg.RequestHistory.RetentionDays))
+	}
+	if oldCfg.RequestHistory.MaxSessions != newCfg.RequestHistory.MaxSessions {
+		changes = append(changes, fmt.Sprintf("request-history.max-sessions: %d -> %d", oldCfg.RequestHistory.MaxSessions, newCfg.RequestHistory.MaxSessions))
+	}
 	if oldCfg.DisableClaudeCloakMode != newCfg.DisableClaudeCloakMode {
 		changes = append(changes, fmt.Sprintf("disable-claude-cloak-mode: %t -> %t", oldCfg.DisableClaudeCloakMode, newCfg.DisableClaudeCloakMode))
 	}
