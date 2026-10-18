@@ -40,7 +40,7 @@ func (s *Service) HandleUsage(ctx context.Context, record coreusage.Record) {
 		AuthID:   record.AuthID,
 		Model:    model,
 		KeyHash:  HashClientKey(record.APIKey),
-		Agent:    agentFamily(internallogging.GetClientRequestMetadata(ctx).UserAgent),
+		Agent:    AgentFamily(internallogging.GetClientRequestMetadata(ctx).UserAgent),
 		Requests: 1,
 		Tokens:   uncachedTokens(record.Detail),
 	})
@@ -77,9 +77,9 @@ func uncachedTokens(detail coreusage.Detail) int64 {
 	return total
 }
 
-// agentFamily reduces a user agent to its first product token, e.g.
+// AgentFamily reduces a user agent to its first product token, e.g.
 // "claude-cli/2.1.3 (external, cli)" becomes "claude-cli".
-func agentFamily(userAgent string) string {
+func AgentFamily(userAgent string) string {
 	userAgent = strings.TrimSpace(userAgent)
 	if userAgent == "" {
 		return "-"

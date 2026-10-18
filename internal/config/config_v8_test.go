@@ -943,3 +943,20 @@ func TestV8QuotaForecastPath(t *testing.T) {
 		t.Fatalf("quota forecast config = %+v", cfg.QuotaForecast)
 	}
 }
+
+func TestV8RequestHistoryPath(t *testing.T) {
+	cfg, err := ParseConfigBytes([]byte("config-version: 8\nobservability:\n  usage:\n    request-history:\n      enabled: true\n      max-entries: 20000\n      retention-days: 3\n      max-sessions: 50\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RequestHistory.Enabled || cfg.RequestHistory.MaxEntries != 20000 || cfg.RequestHistory.RetentionDays != 3 || cfg.RequestHistory.MaxSessions != 50 {
+		t.Fatalf("request history config = %+v", cfg.RequestHistory)
+	}
+	legacy, err := ParseConfigBytes([]byte("request-history:\n  enabled: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !legacy.RequestHistory.Enabled {
+		t.Fatalf("legacy request history config = %+v", legacy.RequestHistory)
+	}
+}

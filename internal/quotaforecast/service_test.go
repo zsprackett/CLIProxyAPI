@@ -112,10 +112,10 @@ func TestHandleUsageIgnoresDisabledAndUnsupported(t *testing.T) {
 }
 
 func TestUsageHelpers(t *testing.T) {
-	if got := agentFamily("claude-cli/2.1.3 (external, cli)"); got != "claude-cli" {
+	if got := AgentFamily("claude-cli/2.1.3 (external, cli)"); got != "claude-cli" {
 		t.Fatalf("agent = %q", got)
 	}
-	if got := agentFamily(""); got != "-" {
+	if got := AgentFamily(""); got != "-" {
 		t.Fatalf("empty agent = %q", got)
 	}
 	if HashClientKey("") != "-" || len(HashClientKey("k")) != 12 || HashClientKey("k") == HashClientKey("j") {

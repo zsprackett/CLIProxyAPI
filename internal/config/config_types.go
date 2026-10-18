@@ -365,6 +365,23 @@ type QuotaForecastConfig struct {
 	AlertWebhookURL string `yaml:"alert-webhook-url,omitempty" json:"alert-webhook-url,omitempty"`
 }
 
+// RequestHistoryConfig controls the in-memory upstream request log with prompt-cache
+// verdicts served at /v8/management/observability/requests.
+type RequestHistoryConfig struct {
+	// Enabled turns on recording, persisted to <auth-dir>/.request-history.gz.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// MaxEntries bounds the log. Default 50000 (about 12 MB), max 500000.
+	MaxEntries int `yaml:"max-entries,omitempty" json:"max-entries,omitempty"`
+
+	// RetentionDays drops entries older than this. Default 7, max 30.
+	RetentionDays int `yaml:"retention-days,omitempty" json:"retention-days,omitempty"`
+
+	// MaxSessions bounds how many sessions keep a cache baseline. Default 1000, max 10000.
+	// The baseline hashes also share a fixed 8 MiB budget.
+	MaxSessions int `yaml:"max-sessions,omitempty" json:"max-sessions,omitempty"`
+}
+
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first", "soonest-reset".

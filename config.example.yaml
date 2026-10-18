@@ -1122,6 +1122,16 @@ observability:
     # Default: 60. Max: 3600.
     redis-usage-queue-retention-seconds: 60
 
+    # Record every upstream attempt (time, status, session, client key hash, credential,
+    # model, latency, tokens) with a prompt-cache verdict and the likely cause of a miss,
+    # served at /v8/management/observability/requests. No prompt text is stored. History is
+    # kept in <auth-dir>/.request-history.gz. Not available in home mode.
+    # request-history:
+    #   enabled: false
+    #   max-entries: 50000          # 1-500000, default 50000 (about 12 MB)
+    #   retention-days: 7           # 1-30, default 7
+    #   max-sessions: 1000          # 1-10000 sessions that keep a cache baseline, default 1000
+
   # Enable pprof HTTP debug server (host:port). Keep it bound to localhost for safety.
   pprof:
     enable: false
