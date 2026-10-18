@@ -377,15 +377,23 @@ func (r *UsageReporter) SetTranslatedReasoningEffort(payload []byte, format stri
 // upstream request path. Calling it again (retry inside one attempt, websocket
 // rebuild) replaces the body.
 func (r *UsageReporter) CapturePrompt(body []byte, format string) {
-	panic("not implemented")
+	if r == nil || !prompt.CaptureEnabled() {
+		return
+	}
+	r.promptBody, r.promptFormat = body, prompt.ParseFormat(format)
 }
 
 // withPrompt hashes the captured body and attaches the print to ctx. Runs once
 // per attempt on the publishing goroutine, after the upstream response was fully
 // read. Failed attempts skip hashing: their verdict is n/a and they never become
-// a baseline.
+// a baseline. The body is released either way.
 func (r *UsageReporter) withPrompt(ctx context.Context, failed bool) context.Context {
-	panic("not implemented")
+	body := r.promptBody
+	r.promptBody = nil
+	if failed || body == nil || !prompt.CaptureEnabled() {
+		return ctx
+	}
+	return prompt.WithPrint(ctx, prompt.Of(body, r.promptFormat))
 }
 
 func (r *UsageReporter) TrackHTTPClient(client *http.Client) *http.Client {
@@ -577,6 +585,7 @@ func (r *UsageReporter) publishWithOutcome(ctx context.Context, detail usage.Det
 	}
 	detail = normalizeUsageDetailTotal(detail, r.provider, r.executorType)
 	r.once.Do(func() {
+		ctx := r.withPrompt(ctx, failed)
 		r.publishAttemptRecord(ctx, r.buildRecord(detail, failed, fail))
 	})
 }
@@ -605,6 +614,7 @@ func (r *UsageReporter) EnsurePublished(ctx context.Context) {
 		return
 	}
 	r.once.Do(func() {
+		ctx := r.withPrompt(ctx, false)
 		r.publishAttemptRecord(ctx, r.buildRecord(usage.Detail{}, false, usage.Failure{}))
 	})
 }
