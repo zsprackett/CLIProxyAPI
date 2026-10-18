@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -66,6 +67,14 @@ type UsageReporter struct {
 	// upstreamModel holds the canonical upstream model expected to be served when
 	// it differs from the requested model (e.g. local Kimi model mappings).
 	upstreamModel string
+
+	// promptBody is the final upstream body, held by reference (no copy) from
+	// CapturePrompt until publish, then released. nil when capture is disabled.
+	// Written on the request goroutine before the upstream call; read inside
+	// once.Do on the goroutine that publishes. The happens-before edge is the same
+	// one SetTranslatedReasoningEffort relies on for r.reasoning.
+	promptBody   []byte
+	promptFormat prompt.Format
 }
 
 type usageExecutor interface {
@@ -361,6 +370,22 @@ func (r *UsageReporter) SetTranslatedReasoningEffort(payload []byte, format stri
 		return
 	}
 	r.reasoning = thinking.ExtractTranslatedReasoningEffort(payload, format)
+}
+
+// CapturePrompt remembers the final upstream body for fingerprinting at publish.
+// Costs one atomic load and two stores; no hashing, no copy, nothing on the
+// upstream request path. Calling it again (retry inside one attempt, websocket
+// rebuild) replaces the body.
+func (r *UsageReporter) CapturePrompt(body []byte, format string) {
+	panic("not implemented")
+}
+
+// withPrompt hashes the captured body and attaches the print to ctx. Runs once
+// per attempt on the publishing goroutine, after the upstream response was fully
+// read. Failed attempts skip hashing: their verdict is n/a and they never become
+// a baseline.
+func (r *UsageReporter) withPrompt(ctx context.Context, failed bool) context.Context {
+	panic("not implemented")
 }
 
 func (r *UsageReporter) TrackHTTPClient(client *http.Client) *http.Client {

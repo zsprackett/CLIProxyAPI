@@ -93,6 +93,9 @@ type Config struct {
 	// attribution and exhaustion alerts for pooled OAuth credentials.
 	QuotaForecast QuotaForecastConfig `yaml:"quota-forecast" json:"quota-forecast"`
 
+	// RequestHistory records every upstream attempt with a prompt-cache verdict.
+	RequestHistory RequestHistoryConfig `yaml:"request-history" json:"request-history"`
+
 	// RequestRetry defines the number of additional credential retry rounds after
 	// the first round has exhausted its eligible credentials.
 	RequestRetry int `yaml:"request-retry" json:"request-retry"`
