@@ -58,7 +58,14 @@ type laneUpdate struct {
 	print        *prompt.Print
 }
 
-func newTracker(maxSessions int) *tracker { panic("not implemented") }
+func newTracker(maxSessions int) *tracker {
+	return &tracker{
+		sessions:    make(map[string]*session),
+		lru:         list.New(),
+		maxSessions: max(maxSessions, 1),
+		hashBudget:  trackerHashBudget,
+	}
+}
 
 // observe judges obs and applies the resulting lane update atomically, so two
 // records of one session can never be judged against a half-updated baseline.
@@ -81,7 +88,17 @@ func (t *tracker) observe(obs observation) Verdict { panic("not implemented") }
 // baseline returns the same-model lane when present (sameModel=true), otherwise
 // the most recently touched lane of any model (sameModel=false), or nil.
 // A nil *session returns nil.
-func (s *session) baseline(model string) (base *lane, sameModel bool) { panic("not implemented") }
+func (s *session) baseline(model string) (base *lane, sameModel bool) {
+	if s == nil || len(s.lanes) == 0 {
+		return nil, false
+	}
+	for i := range s.lanes {
+		if s.lanes[i].model == model {
+			return &s.lanes[i], true
+		}
+	}
+	return &s.lanes[0], false
+}
 
 // evictLocked drops least-recently-observed sessions while
 // len(sessions) > maxSessions || hashes > hashBudget.

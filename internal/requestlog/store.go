@@ -1,6 +1,9 @@
 package requestlog
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -81,7 +84,22 @@ type ring struct {
 	fileMu sync.Mutex
 }
 
-func newRing(max int) *ring { panic("not implemented") }
+func newRing(size int) *ring {
+	return &ring{
+		max:    max(size, 1),
+		epoch:  newEpoch(),
+		intern: make(map[string]string),
+	}
+}
+
+// newEpoch returns a short random label for one store generation.
+func newEpoch() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
+}
 
 // append assigns the next seq, interns strings, and stores r, overwriting the
 // oldest row when full. O(1). Returns the assigned seq.

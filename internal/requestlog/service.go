@@ -63,7 +63,14 @@ var defaultService = newService()
 // Default returns the process-wide request log.
 func Default() *Service { return defaultService }
 
-func newService() *Service { panic("not implemented") }
+func newService() *Service {
+	return &Service{
+		ring:    newRing(defaultMaxEntries),
+		tracker: newTracker(defaultMaxSessions),
+		now:     time.Now,
+		reason:  "disabled",
+	}
+}
 
 // Start records the manager, runs one refresh, and starts the tick loop. No-op
 // when already running. Not called in home mode (service_lifecycle.go only
