@@ -12,6 +12,7 @@ import { KIMI_CONFIG } from './providers/kimi/data';
 import { META_CONFIG } from './providers/meta/data';
 import { XAI_CONFIG } from './providers/xai/data';
 import type { QuotaProviderType } from './providers/types';
+import { readQuotaSnapshot } from './snapshot/windows';
 import { QUOTA_TAB_ORDER, type QuotaSortMode, type QuotaTabId } from './constants';
 
 const QUOTA_FILTER_MAP: Record<QuotaProviderType, (file: AuthFileItem) => boolean> = {
@@ -131,8 +132,10 @@ export function countQuotaCredentials(
   let attentionCount = 0;
   for (const entry of entries) {
     const status = liveStatusOf(entry);
-    if (status === 'success') loadedCount += 1;
-    else if (status === 'error') attentionCount += 1;
+    if (status === 'success' || readQuotaSnapshot(entry.type, entry.file.quota_snapshot)) {
+      loadedCount += 1;
+    }
+    if (status === 'error') attentionCount += 1;
   }
   return { loadedCount, attentionCount };
 }
