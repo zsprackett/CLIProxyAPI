@@ -472,6 +472,40 @@ func TestQuotaSnapshotApplyIgnoresEqualExtras(t *testing.T) {
 	}
 }
 
+func TestQuotaSnapshotOlderOKValueNeverReplacesStoredFailedSection(t *testing.T) {
+	newer := snapshotNow.Add(time.Hour)
+	older := snapshotNow
+	var s QuotaSnapshot
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: newer,
+		Extras: XAIExtras{Weekly: OKSection(XAIWeekly{}, newer)}})
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: newer.Add(time.Hour),
+		Extras: XAIExtras{Weekly: FailedSection[XAIWeekly]("503", newer.Add(time.Hour))}})
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: older,
+		Extras: XAIExtras{Weekly: OKSection(XAIWeekly{}, older)}})
+	weekly := s.Extras.(XAIExtras).Weekly
+	if !weekly.ValueAt.Equal(newer) {
+		t.Fatalf("an older ok value replaced the stored value of a failed section: ValueAt = %v, want %v", weekly.ValueAt, newer)
+	}
+}
+
+func TestQuotaSnapshotZeroTimeFailureAndNotApplicableApply(t *testing.T) {
+	var s QuotaSnapshot
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: snapshotNow,
+		Extras: XAIExtras{Weekly: OKSection(XAIWeekly{}, snapshotNow), Monthly: OKSection(XAIMonthly{}, snapshotNow)}})
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: snapshotNow,
+		Extras: XAIExtras{
+			Weekly:  Section[XAIWeekly]{Status: SectionFailed, Error: "503"},
+			Monthly: Section[XAIMonthly]{Status: SectionNotApplicable},
+		}})
+	extras := s.Extras.(XAIExtras)
+	if extras.Weekly.Status != SectionFailed || extras.Weekly.Error != "503" {
+		t.Fatalf("a failed section with an unknown check time was dropped: %+v", extras.Weekly)
+	}
+	if extras.Monthly.Status != SectionNotApplicable {
+		t.Fatalf("a not_applicable section with an unknown check time was dropped: %+v", extras.Monthly)
+	}
+}
+
 func TestQuotaSnapshotMergeSectionIgnoresOlderFailure(t *testing.T) {
 	earlier := snapshotNow.Add(-time.Hour)
 	var s QuotaSnapshot

@@ -436,3 +436,28 @@ func TestQuotaPollXAIPeriodSwitchRetiresWeeklyWindow(t *testing.T) {
 		t.Fatalf("monthly window = %+v, want 12 used", got["xai:monthly"])
 	}
 }
+
+func TestQuotaPollXAIWeeklyAfterMonthlyRetiresMonthlyWindow(t *testing.T) {
+	now := time.Now()
+	var snapshot QuotaSnapshot
+	monthly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "monthly", "X-Xai-Billing-Used-Percent", "12",
+		"X-Xai-Billing-Window-Minutes", "43200",
+		"X-Xai-Billing-Reset-At", now.Add(500*time.Hour).UTC().Format(time.RFC3339)), now.Add(-time.Hour))
+	if !ok || !snapshot.Observe(monthly) {
+		t.Fatal("monthly xai poll produced no change")
+	}
+	weekly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "weekly", "X-Xai-Billing-Used-Percent", "35",
+		"X-Xai-Billing-Reset-At", now.Add(100*time.Hour).UTC().Format(time.RFC3339)), now)
+	if !ok || !snapshot.Observe(weekly) {
+		t.Fatal("weekly xai poll produced no change")
+	}
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "xai", QuotaSnapshot: snapshot}))
+	if stale, ok := got["xai:monthly"]; ok {
+		t.Fatalf("stale monthly window survived the switch to a weekly period: %+v", stale)
+	}
+	if got["xai:weekly"].UsedPercent != 35 {
+		t.Fatalf("weekly window = %+v, want 35 used", got["xai:weekly"])
+	}
+}
