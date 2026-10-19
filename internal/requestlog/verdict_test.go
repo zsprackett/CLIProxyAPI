@@ -78,7 +78,7 @@ func TestJudgeNotApplicable(t *testing.T) {
 		{"below minimum", obsAt(t0.Add(time.Minute), "s", "opus", "a", 1, 0, 0, p), &session{id: "s", lanes: []lane{laneAt("opus", "a", t0, 500, 5*time.Minute, p)}}, NABelowMinimum},
 	}
 	for _, tc := range cases {
-		v, upd := judge(tc.obs, tc.sess)
+		v, upd := judgeIn(tc.obs, tc.sess)
 		if v.Kind != VerdictNA || v.NA != tc.want {
 			t.Errorf("%s: verdict = %+v, want NA %v", tc.name, v, tc.want)
 		}
@@ -91,7 +91,7 @@ func TestJudgeNotApplicable(t *testing.T) {
 
 func TestJudgeColdSetsBaseline(t *testing.T) {
 	p := claudePrintOf(claudeOpts{messages: []string{"hi"}})
-	v, upd := judge(obsAt(t0, "s", "opus", "a", 100, 2000, 3000, p), nil)
+	v, upd := judgeIn(obsAt(t0, "s", "opus", "a", 100, 2000, 3000, p), nil)
 	if v.Kind != VerdictCold || upd == nil {
 		t.Fatalf("first request = %+v upd=%v", v, upd)
 	}
@@ -99,11 +99,11 @@ func TestJudgeColdSetsBaseline(t *testing.T) {
 		t.Fatalf("claude lane = %+v", *upd)
 	}
 	// Cold with a read > 0 is possible when another session shares the prefix.
-	if v, _ = judge(obsAt(t0, "s", "opus", "a", 100, 2000, 0, p), &session{id: "s"}); v.Kind != VerdictCold {
+	if v, _ = judgeIn(obsAt(t0, "s", "opus", "a", 100, 2000, 0, p), &session{id: "s"}); v.Kind != VerdictCold {
 		t.Fatalf("empty session = %+v", v)
 	}
 	c := codexPrintOf(codexOpts{input: []string{testInA}})
-	_, upd = judge(obsAt(t0, "s", "gpt-5", "a", 300, 9984, 0, c), nil)
+	_, upd = judgeIn(obsAt(t0, "s", "gpt-5", "a", 300, 9984, 0, c), nil)
 	if upd == nil || upd.cachedPrefix != 10240 || upd.ttl != codexIdleGuess {
 		t.Fatalf("codex lane = %+v", upd)
 	}
@@ -115,7 +115,7 @@ func TestJudgeColdSetsBaseline(t *testing.T) {
 func TestJudgeNewModelIsCold(t *testing.T) {
 	p := claudePrintOf(claudeOpts{messages: []string{"one", "two"}})
 	sess := &session{id: "s", lanes: []lane{laneAt("opus", "a", t0, 250000, 5*time.Minute, p)}}
-	v, upd := judge(obsAt(t0.Add(30*time.Second), "s", "sonnet", "a", 90, 117000, 124, p), sess)
+	v, upd := judgeIn(obsAt(t0.Add(30*time.Second), "s", "sonnet", "a", 90, 117000, 124, p), sess)
 	if v.Kind != VerdictCold || v.Primary != CauseModel || !v.Causes.Has(CauseModel) || v.Expected != 0 {
 		t.Fatalf("first sonnet after opus = %+v", v)
 	}
@@ -152,7 +152,7 @@ func TestJudgeHitPartialMissThresholds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		sess := &session{id: "s", lanes: []lane{laneAt(tc.model, "a", t0, tc.expected, 5*time.Minute, tc.p)}}
-		v, upd := judge(obsAt(t0.Add(30*time.Second), "s", tc.model, "a", 100, tc.read, 0, tc.p), sess)
+		v, upd := judgeIn(obsAt(t0.Add(30*time.Second), "s", tc.model, "a", 100, tc.read, 0, tc.p), sess)
 		if v.Kind != tc.want {
 			t.Errorf("%s: verdict = %v (%+v), want %v", tc.name, v.Kind, v, tc.want)
 		}
@@ -189,19 +189,19 @@ func TestJudgeCauses(t *testing.T) {
 	}{
 		{
 			name: "credential beats everything", kind: VerdictMiss, primary: CauseCredential, confidence: ConfidenceHigh,
-			obs:    obsAt(late, "s", "opus", "b", 100, 0, 0, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
+			obs:    obsAt(late, "s", "opus", "b", 100, 0, 10000, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseCredential, CauseTools, CauseIdle}, segment: prompt.SegmentRef{Kind: prompt.SegmentTools}, tools: [2]uint16{1, 2},
 		},
 		{
 			name: "idle beats tools on a miss", kind: VerdictMiss, primary: CauseIdle, confidence: ConfidenceHigh,
-			obs:    obsAt(late, "s", "opus", "a", 100, 0, 0, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
+			obs:    obsAt(late, "s", "opus", "a", 100, 0, 10000, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseTools, CauseIdle}, segment: prompt.SegmentRef{Kind: prompt.SegmentTools}, tools: [2]uint16{1, 2},
 		},
 		{
 			name: "tools beat idle on a partial read", kind: VerdictPartial, primary: CauseTools, confidence: ConfidenceHigh,
-			obs:    obsAt(late, "s", "opus", "a", 100, 4000, 0, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
+			obs:    obsAt(late, "s", "opus", "a", 100, 4000, 6000, claudePrintOf(claudeOpts{tools: []string{testToolA, testToolB}, messages: []string{"one", "two"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseTools, CauseIdle}, segment: prompt.SegmentRef{Kind: prompt.SegmentTools}, tools: [2]uint16{1, 2},
 		},
@@ -213,19 +213,19 @@ func TestJudgeCauses(t *testing.T) {
 		},
 		{
 			name: "system block changed", kind: VerdictPartial, primary: CauseSystem, confidence: ConfidenceHigh,
-			obs:    obsAt(soon, "s", "opus", "a", 100, 3000, 0, claudePrintOf(claudeOpts{system: "You are someone else.", messages: []string{"one", "two"}})),
+			obs:    obsAt(soon, "s", "opus", "a", 100, 3000, 7000, claudePrintOf(claudeOpts{system: "You are someone else.", messages: []string{"one", "two"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseSystem}, segment: prompt.SegmentRef{Kind: prompt.SegmentSystem, Index: 1},
 		},
 		{
 			name: "settings changed", kind: VerdictPartial, primary: CauseSettings, confidence: ConfidenceHigh,
-			obs:    obsAt(soon, "s", "opus", "a", 100, 3000, 0, claudePrintOf(claudeOpts{thinking: `{"type":"enabled","budget_tokens":2048}`, messages: []string{"one", "two"}})),
+			obs:    obsAt(soon, "s", "opus", "a", 100, 3000, 7000, claudePrintOf(claudeOpts{thinking: `{"type":"enabled","budget_tokens":2048}`, messages: []string{"one", "two"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseSettings}, segment: prompt.SegmentRef{Kind: prompt.SegmentSettings},
 		},
 		{
 			name: "message changed", kind: VerdictPartial, primary: CauseMessage, confidence: ConfidenceHigh,
-			obs:    obsAt(soon, "s", "opus", "a", 100, 3000, 0, claudePrintOf(claudeOpts{messages: []string{"one", "TWO"}})),
+			obs:    obsAt(soon, "s", "opus", "a", 100, 3000, 7000, claudePrintOf(claudeOpts{messages: []string{"one", "TWO"}})),
 			sess:   claudeLane("a", t0, 5*time.Minute),
 			causes: []Cause{CauseMessage}, segment: prompt.SegmentRef{Kind: prompt.SegmentMessage, Index: 1},
 		},
@@ -267,13 +267,13 @@ func TestJudgeCauses(t *testing.T) {
 		},
 		{
 			name: "codex instructions changed", kind: VerdictMiss, primary: CauseInstructions, confidence: ConfidenceHigh,
-			obs:    obsAt(soon, "s", "gpt-5", "a", 300, 0, 0, codexPrintOf(codexOpts{instructions: "be verbose", cacheKey: "k1", input: []string{testInA}})),
+			obs:    obsAt(soon, "s", "gpt-5", "a", 10300, 0, 0, codexPrintOf(codexOpts{instructions: "be verbose", cacheKey: "k1", input: []string{testInA}})),
 			sess:   codexLane(t0),
 			causes: []Cause{CauseInstructions}, segment: prompt.SegmentRef{Kind: prompt.SegmentInstructions},
 		},
 		{
 			name: "codex input changed", kind: VerdictMiss, primary: CauseMessage, confidence: ConfidenceHigh,
-			obs:    obsAt(soon, "s", "gpt-5", "a", 300, 0, 0, codexPrintOf(codexOpts{cacheKey: "k1", input: []string{testInB}})),
+			obs:    obsAt(soon, "s", "gpt-5", "a", 10300, 0, 0, codexPrintOf(codexOpts{cacheKey: "k1", input: []string{testInB}})),
 			sess:   codexLane(t0),
 			causes: []Cause{CauseMessage}, segment: prompt.SegmentRef{Kind: prompt.SegmentInput, Index: 0},
 		},
@@ -285,7 +285,7 @@ func TestJudgeCauses(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		v, upd := judge(tc.obs, tc.sess)
+		v, upd := judgeIn(tc.obs, tc.sess)
 		if v.Kind != tc.kind || v.Primary != tc.primary || v.Confidence != tc.confidence {
 			t.Errorf("%s: verdict = kind %v primary %v confidence %v (%+v)", tc.name, v.Kind, v.Primary, v.Confidence, v)
 			continue
@@ -314,15 +314,34 @@ func TestJudgeCauses(t *testing.T) {
 
 func TestSessionBaseline(t *testing.T) {
 	var none *session
-	if base := none.baseline("opus"); base != nil {
+	p := claudePrintOf(claudeOpts{messages: []string{"hi"}})
+	if base := none.baseline("opus", p); base != nil {
 		t.Fatal("nil session must have no baseline")
 	}
-	p := claudePrintOf(claudeOpts{messages: []string{"hi"}})
 	sess := &session{id: "s", lanes: []lane{laneAt("haiku", "a", t0.Add(time.Minute), 1, 0, p), laneAt("opus", "a", t0, 2, 0, p)}}
-	if base := sess.baseline("opus"); base == nil || base.cachedPrefix != 2 {
+	if base := sess.baseline("opus", p); base == nil || base.cachedPrefix != 2 {
 		t.Fatalf("same-model lane = %+v", base)
 	}
-	if base := sess.baseline("sonnet"); base != nil {
+	if base := sess.baseline("sonnet", p); base != nil {
 		t.Fatalf("another model's lane is never a baseline, got %+v", base)
+	}
+}
+
+func TestSessionBaselinePicksLongestSharedPrefix(t *testing.T) {
+	short := claudePrintOf(claudeOpts{messages: []string{"a", "b"}})
+	long := claudePrintOf(claudeOpts{messages: []string{"x", "y", "z"}})
+	other := claudePrintOf(claudeOpts{messages: []string{"x", "q"}})
+	sess := &session{id: "s", lanes: []lane{
+		laneAt("opus", "a", t0.Add(2*time.Minute), 1, 0, short), // most recent, shares only the preamble
+		laneAt("opus", "a", t0, 2, 0, long),
+		laneAt("opus", "a", t0.Add(time.Minute), 3, 0, other), // shares as much as long, more recent
+	}}
+	next := claudePrintOf(claudeOpts{messages: []string{"x", "y", "z", "w"}})
+	if base := sess.baseline("opus", next); base == nil || base.cachedPrefix != 2 {
+		t.Fatalf("the lane the request extends must win, got %+v", base)
+	}
+	tie := claudePrintOf(claudeOpts{messages: []string{"x", "n"}})
+	if base := sess.baseline("opus", tie); base == nil || base.cachedPrefix != 3 {
+		t.Fatalf("a tie must go to the most recently touched lane, got %+v", base)
 	}
 }

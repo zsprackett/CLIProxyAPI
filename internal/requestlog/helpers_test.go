@@ -133,3 +133,28 @@ func obsAt(at time.Time, session, model, auth string, uncached, read, write int6
 func laneAt(model, auth string, touched time.Time, cachedPrefix int64, ttl time.Duration, p *prompt.Print) lane {
 	return lane{model: model, authID: auth, touchedAt: touched, cachedPrefix: cachedPrefix, ttl: ttl, print: p}
 }
+
+// classifierPrintOf builds a body in the shape of Claude Code's auto-mode
+// classifier: a cached CLAUDE.md message, then ONE message that holds the
+// monitored agent's whole transcript as blocks, a breakpoint after the
+// transcript, and the action under review as the tail blocks.
+func classifierPrintOf(transcript []string, action string) *prompt.Print {
+	var b strings.Builder
+	b.WriteString(`{"model":"claude-sonnet-5","max_tokens":64,"system":[{"type":"text","text":"You are a security monitor.","cache_control":{"type":"ephemeral"}}],`)
+	b.WriteString(`"messages":[{"role":"user","content":[{"type":"text","text":"CLAUDE.md","cache_control":{"type":"ephemeral"}}]},`)
+	b.WriteString(`{"role":"user","content":[{"type":"text","text":"<transcript>"}`)
+	for i, entry := range transcript {
+		mark := ""
+		if i == len(transcript)-1 {
+			mark = `,"cache_control":{"type":"ephemeral"}`
+		}
+		b.WriteString(`,{"type":"text","text":"` + entry + `"` + mark + `}`)
+	}
+	b.WriteString(`,{"type":"text","text":"</transcript>"},{"type":"text","text":"` + action + `"}]}]}`)
+	return prompt.Of([]byte(b.String()), prompt.FormatClaudeMessages)
+}
+
+// judgeIn judges obs against the lane the tracker would choose in sess.
+func judgeIn(obs observation, sess *session) (Verdict, *laneUpdate) {
+	return judge(obs, sess, sess.baseline(obs.model, obs.print))
+}

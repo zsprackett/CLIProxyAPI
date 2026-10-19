@@ -335,3 +335,89 @@ func TestCaptureGate(t *testing.T) {
 		t.Fatal("gate must open")
 	}
 }
+
+// multiBlockBody builds a Claude body whose messages each hold several text blocks.
+func multiBlockBody(messages ...[]string) []byte {
+	var b strings.Builder
+	b.WriteString(`{"system":"be brief","messages":[`)
+	for i, blocks := range messages {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"role":"user","content":[`)
+		for j, text := range blocks {
+			if j > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(`{"type":"text","text":"` + text + `"}`)
+		}
+		b.WriteString(`]}`)
+	}
+	b.WriteString(`]}`)
+	return []byte(b.String())
+}
+
+func TestClaudeBlocksAreSegmentsReportedByMessage(t *testing.T) {
+	prev := Of(multiBlockBody([]string{"ctx"}, []string{"<t>", "a", "b", "c", "act1"}), FormatClaudeMessages)
+	if prev.Size() != 2+6 {
+		t.Fatalf("system + settings + 6 blocks, got %d", prev.Size())
+	}
+	tail := Of(multiBlockBody([]string{"ctx"}, []string{"<t>", "a", "b", "c", "d", "act2"}), FormatClaudeMessages)
+	if d := tail.Diverge(prev); d.Kind != Changed || d.At != (SegmentRef{Kind: SegmentMessage, Index: 1}) {
+		t.Fatalf("a block change inside message 1 must name message 1, got %+v", d)
+	}
+	if got := tail.SharedPrefix(prev); got != 2+5 {
+		t.Fatalf("a rewritten tail shares every block before it: %d", got)
+	}
+	sibling := Of(multiBlockBody([]string{"ctx"}, []string{"<t>", "x", "y"}), FormatClaudeMessages)
+	if got := sibling.SharedPrefix(prev); got != 2+2 {
+		t.Fatalf("another transcript shares only the preamble: %d", got)
+	}
+	moved := Of(multiBlockBody([]string{"ctx", "<t>"}, []string{"a", "b", "c", "act1"}), FormatClaudeMessages)
+	if d := moved.Diverge(prev); d.Kind != Changed || d.At != (SegmentRef{Kind: SegmentMessage, Index: 0}) {
+		t.Fatalf("a block that moves to another message is a change, got %+v", d)
+	}
+	empty := Of([]byte(`{"messages":[{"role":"user","content":[]},{"role":"user","content":"hi"}]}`), FormatClaudeMessages)
+	if empty.Size() != 1+2 || empty.refAt(2) != (SegmentRef{Kind: SegmentMessage, Index: 1}) {
+		t.Fatalf("a message with no blocks still takes one slot: size %d", empty.Size())
+	}
+}
+
+func TestSharedPrefixAcrossFormatsAndDeltas(t *testing.T) {
+	claude := Of(claudeBody("aaa", []string{toolA}, "", []string{"one"}, ""), FormatClaudeMessages)
+	codex := Of(codexBody("be brief", "k1", "", []string{toolA}, []string{inA}), FormatCodexResponses)
+	delta := Of(codexBody("be brief", "k1", "resp_1", []string{toolA}, []string{inA}), FormatCodexResponses)
+	if claude.SharedPrefix(codex) != 0 || delta.SharedPrefix(codex) != 0 || codex.SharedPrefix(nil) != 0 {
+		t.Fatal("prints of another format, deltas and nil share nothing")
+	}
+	if codex.SharedPrefix(codex) != codex.Size() {
+		t.Fatal("a print shares its whole prefix with itself")
+	}
+}
+
+func TestMarshalKeepsMessageStartsAndRejectsVersion1(t *testing.T) {
+	p := Of(multiBlockBody([]string{"ctx"}, []string{"<t>", "a", "b"}, []string{"c"}), FormatClaudeMessages)
+	data, err := p.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var q Print
+	if err = q.UnmarshalBinary(data); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < p.Size(); i++ {
+		if q.refAt(i) != p.refAt(i) {
+			t.Fatalf("round trip moved segment %d: %+v vs %+v", i, q.refAt(i), p.refAt(i))
+		}
+	}
+	old := append([]byte(nil), data...)
+	old[0] = 1
+	if err = q.UnmarshalBinary(old); err == nil {
+		t.Fatal("a version 1 print hashed whole messages and must be rejected")
+	}
+	bad := append([]byte(nil), data...)
+	bad[len(bad)-4] = 0 // last message start moved back to 0: out of order
+	if err = q.UnmarshalBinary(bad); err == nil {
+		t.Fatal("message starts out of order must be rejected")
+	}
+}

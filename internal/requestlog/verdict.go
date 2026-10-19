@@ -191,11 +191,12 @@ func toleranceFor(format prompt.Format, expected int64) int64 {
 
 func notApplicable(reason NAReason) Verdict { return Verdict{Kind: VerdictNA, NA: reason} }
 
-// judge computes the verdict for obs against the session's lanes and returns the
-// lane update to apply (nil when the session baseline must not change).
+// judge computes the verdict for obs against base, the lane chosen by
+// session.baseline, and returns the lane update to apply (nil when the session
+// baseline must not change).
 // Pure function; called by the tracker with its mutex held.
 // O(len(print.hashes)), no allocation on the hit path.
-func judge(obs observation, sess *session) (Verdict, *laneUpdate) {
+func judge(obs observation, sess *session, base *lane) (Verdict, *laneUpdate) {
 	switch {
 	case obs.failed:
 		return notApplicable(NAFailed), nil
@@ -206,7 +207,6 @@ func judge(obs observation, sess *session) (Verdict, *laneUpdate) {
 	case obs.sessionID == "":
 		return notApplicable(NANoSession), nil
 	}
-	base := sess.baseline(obs.model)
 	ttl, _ := obs.print.TTL()
 	upd := &laneUpdate{model: obs.model, authID: obs.authID, touchedAt: obs.touchedAt, cachedPrefix: cachedPrefix(obs), ttl: ttl, print: obs.print}
 	if base == nil {
@@ -224,8 +224,15 @@ func judge(obs observation, sess *session) (Verdict, *laneUpdate) {
 
 	expected := base.cachedPrefix
 	div := obs.print.Diverge(base.print)
-	if div.Kind == prompt.Truncated {
+	if div.Kind == prompt.Changed || div.Kind == prompt.Truncated {
+		// A request can never read more than its own prompt.
 		expected = min(expected, obs.tokens.promptTotal())
+		// Sharing less than half of the baseline means obs starts another
+		// conversation in this session (a sibling agent's transcript, or a branch
+		// after an edit): keep the baseline for its own next request. A request
+		// that only rewrites its tail (the classifier's action under review)
+		// continues the baseline and replaces it.
+		upd.fork = 2*obs.print.SharedPrefix(base.print) < base.print.Size()
 	}
 	if expected < minCacheableTokens {
 		return notApplicable(NABelowMinimum), upd
