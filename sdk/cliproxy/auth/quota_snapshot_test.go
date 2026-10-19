@@ -392,7 +392,55 @@ func TestQuotaSnapshotCloneIsIndependent(t *testing.T) {
 	if used, _ := s.Windows[0].Used.Get(); used != 1 || *s.Extras.(ClaudeExtras).Plan.Value != "plan_max" || s.LastPoll.Error != "" {
 		t.Fatalf("clone shares state with the original: %+v", s)
 	}
+
+	var codex QuotaSnapshot
+	codex.apply(QuotaObservation{Provider: ProviderCodex, Source: SourcePoll, ObservedAt: snapshotNow, Extras: CodexExtras{
+		Access:       OKSection(CodexAccess{Allowed: boolPtr(true), LimitReached: boolPtr(false)}, snapshotNow),
+		Credits:      OKSection(CodexCredits{HasCredits: boolPtr(true), Unlimited: boolPtr(false), Balance: stringPtr("5")}, snapshotNow),
+		ResetCredits: OKSection(CodexResetCredits{Available: intPtr(1), ApplicableAvailable: intPtr(1), Credits: []CodexResetCredit{{ID: "credit-1", Status: "available"}}}, snapshotNow),
+	}})
+	codexClone := codex.Clone().Extras.(CodexExtras)
+	*codexClone.Access.Value.Allowed = false
+	*codexClone.Access.Value.LimitReached = true
+	*codexClone.Credits.Value.HasCredits = false
+	*codexClone.Credits.Value.Unlimited = true
+	*codexClone.Credits.Value.Balance = "0"
+	*codexClone.ResetCredits.Value.Available = 9
+	*codexClone.ResetCredits.Value.ApplicableAvailable = 9
+	codexClone.ResetCredits.Value.Credits[0].ID = "changed"
+	original := codex.Extras.(CodexExtras)
+	if !*original.Access.Value.Allowed || *original.Access.Value.LimitReached ||
+		!*original.Credits.Value.HasCredits || *original.Credits.Value.Unlimited || *original.Credits.Value.Balance != "5" ||
+		*original.ResetCredits.Value.Available != 1 || *original.ResetCredits.Value.ApplicableAvailable != 1 ||
+		original.ResetCredits.Value.Credits[0].ID != "credit-1" {
+		t.Fatalf("codex clone shares nested state with the original: %+v", original)
+	}
+
+	var xai QuotaSnapshot
+	xai.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: snapshotNow, Extras: XAIExtras{
+		Access:  XAIAccessGrokCLI,
+		Weekly:  OKSection(XAIWeekly{ProductUsage: []XAIProductUsage{{Product: "grok", Used: KnownPercent(10)}}}, snapshotNow),
+		Monthly: OKSection(XAIMonthly{LimitCents: floatPtr(100), UsedCents: floatPtr(1), IncludedUsedCents: floatPtr(1), OnDemandCapCents: floatPtr(1), OnDemandUsedCents: floatPtr(1), PrepaidBalanceCents: floatPtr(1)}, snapshotNow),
+	}})
+	xaiClone := xai.Clone().Extras.(XAIExtras)
+	xaiClone.Weekly.Value.ProductUsage[0].Product = "changed"
+	for _, cents := range []*float64{
+		xaiClone.Monthly.Value.LimitCents, xaiClone.Monthly.Value.UsedCents, xaiClone.Monthly.Value.IncludedUsedCents,
+		xaiClone.Monthly.Value.OnDemandCapCents, xaiClone.Monthly.Value.OnDemandUsedCents, xaiClone.Monthly.Value.PrepaidBalanceCents,
+	} {
+		*cents = 999
+	}
+	xaiOriginal := xai.Extras.(XAIExtras)
+	monthly := xaiOriginal.Monthly.Value
+	if xaiOriginal.Weekly.Value.ProductUsage[0].Product != "grok" || *monthly.LimitCents != 100 || *monthly.UsedCents != 1 ||
+		*monthly.IncludedUsedCents != 1 || *monthly.OnDemandCapCents != 1 || *monthly.OnDemandUsedCents != 1 || *monthly.PrepaidBalanceCents != 1 {
+		t.Fatalf("xai clone shares nested state with the original: %+v", xaiOriginal)
+	}
 }
+
+func stringPtr(v string) *string { return &v }
+func intPtr(v int) *int          { return &v }
+func floatPtr(v float64) *float64 { return &v }
 
 func TestQuotaSnapshotApplyReportsProviderOnZeroSnapshot(t *testing.T) {
 	var s QuotaSnapshot
