@@ -177,7 +177,7 @@ UI (`Cli-Proxy-API-Management-Center`):
 ## 5. State model: merging poll and passive observation
 - Join key: window `(ID, ModelScope)`; extras field by Go field (section). Snapshot by credential (auth ID). No per-model snapshot.
 - Conflict winner, windows: the observation with the newer `ObservedAt` per key. Tie: poll beats headers (it also carries extras).
-- Conflict winner, extras: `mergeSection(prev, next)`: next `absent` → keep prev. next `ok` and `ValueAt >= prev.ValueAt` → next. next `failed` → keep `prev.Value`/`ValueAt`, set Status failed, Error, CheckedAt. next `not_applicable` → clear Value.
+- Conflict winner, extras: `mergeSection(prev, next)`: next `absent` → keep prev. next `ok` and `ValueAt >= prev.ValueAt` → next; an `ok` older than the stored value never replaces it, whatever the stored status. next `failed` → keep `prev.Value`/`ValueAt`, set Status failed, Error, CheckedAt. next `not_applicable` → clear Value. A `failed` or `not_applicable` with an older explicit `CheckedAt` is ignored; a zero `CheckedAt` means unknown time and is applied.
 - Order rule: per key, by `ObservedAt`, not by arrival. A poll that started before a passive response and finished after it loses on the windows the response carried. `ObservedAt` of a poll = time the response body was read.
 - Unknown id, stored but not in the observation: headers observation → keep (headers are partial). Poll with `Sections[s] == ok` → drop windows of section s that the poll did not return (the poll is authoritative for its section). Poll with `Sections[s] == failed` → keep section s windows untouched.
 - Unknown id, in the observation but not stored: add.
