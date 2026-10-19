@@ -265,11 +265,11 @@ describe('resolveLedgerRow', () => {
   });
 
   const newerSnapshotFile = claudeFile({
-    ...snapshot(
-      'claude',
-      [snapWindow({ used_percent: 50, observed_at: iso(NOW - 3 * HOUR) })],
-      { kind: 'claude', plan: planSection('plan_pro'), extra_usage: absent }
-    ),
+    ...snapshot('claude', [snapWindow({ used_percent: 50, observed_at: iso(NOW - 3 * HOUR) })], {
+      kind: 'claude',
+      plan: planSection('plan_pro'),
+      extra_usage: absent,
+    }),
     updated_at: iso(NOW - HOUR),
   });
 

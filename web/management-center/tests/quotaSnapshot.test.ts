@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import i18n from '@/i18n';
 import { observedLedgerData, resolveLedgerRow } from '@/features/quota/ledgerModel';
 import { buildTimelineLane } from '@/features/quota/quotaTimelineModel';
+import { sortQuotaEntries } from '@/features/quota/logic';
 import { nextRecoveryMs } from '@/features/quota/resetSchedule';
 import type { QuotaSnapshot, QuotaWindow } from '@/features/quota/snapshot/types';
 import { LedgerWindowList, WindowList } from '@/features/quota/snapshot/WindowList';
@@ -360,5 +361,87 @@ describe('stale and exhausted windows', () => {
     expect(readQuotaSnapshot('kimi', empty)).toBeNull();
     expect(readQuotaSnapshot('codex', golden)).toBeNull();
     expect(observedLedgerData('claude', { name: 'c.json', quota_snapshot: empty }, NOW)).toBeNull();
+  });
+});
+
+describe('the newer whole reading', () => {
+  const claudeSnapshot: QuotaSnapshot = {
+    provider: 'claude',
+    windows: [
+      window({
+        id: 'seven_day',
+        class: 'claude:7d',
+        used_percent: 50,
+        reset_at: iso(NOW + 2 * HOUR),
+        observed_at: iso(NOW - 3 * HOUR),
+      }),
+    ],
+    extras: null,
+    last_poll: null,
+    updated_at: iso(NOW - HOUR),
+  };
+  const live = (fetchedAtMs: number) => ({
+    status: 'success',
+    fetchedAtMs,
+    windows: [
+      {
+        id: 'seven-day',
+        label: 'Live 7d',
+        usedPercent: 10,
+        resetAtMs: NOW + 4 * DAY,
+        periodHours: 168,
+      },
+    ],
+  });
+  const lane = (fetchedAtMs: number) =>
+    buildTimelineLane({
+      name: 'a',
+      displayName: 'a',
+      provider: 'claude',
+      quota: live(fetchedAtMs),
+      snapshot: claudeSnapshot,
+      maxPeriodHours: 14 * 24,
+    });
+
+  test('the timeline draws the snapshot when it was updated after the live fetch', () => {
+    const fromSnapshot = lane(NOW - 2 * HOUR);
+    expect(fromSnapshot.anchorMs).toBe(NOW + 2 * HOUR);
+    expect(fromSnapshot.remaining).toBe(50);
+    expect(
+      fromSnapshot.limits.map((limit) => [limit.labelKey ?? limit.label, limit.remaining])
+    ).toEqual([['claude_quota.seven_day', 50]]);
+
+    const fromLive = lane(NOW - 30 * 60 * 1000);
+    expect(fromLive.anchorMs).toBe(NOW + 4 * DAY);
+    expect(fromLive.remaining).toBe(90);
+    expect(
+      fromLive.limits.map((limit) => [limit.labelKey ?? limit.label, limit.remaining])
+    ).toEqual([['Live 7d', 90]]);
+  });
+
+  test('the soonest-recovery sort orders by the newer reading', () => {
+    const entries = [
+      { type: 'claude' as const, file: { name: 'b.json', type: 'claude' } },
+      {
+        type: 'claude' as const,
+        file: { name: 'a.json', type: 'claude', quota_snapshot: claudeSnapshot },
+      },
+    ];
+    const order = (aFetchedAtMs: number) => {
+      const quotas: Record<string, unknown> = {
+        'a.json': live(aFetchedAtMs),
+        'b.json': { ...live(NOW), windows: [{ id: 'seven-day', resetAtMs: NOW + DAY }] },
+      };
+      return sortQuotaEntries(entries, 'soonest', (entry) =>
+        nextRecoveryMs(
+          entry.type,
+          quotas[entry.file.name],
+          NOW,
+          readQuotaSnapshot(entry.type, entry.file.quota_snapshot)
+        )
+      ).map((entry) => entry.file.name);
+    };
+    expect(order(NOW - 2 * HOUR)).toEqual(['a.json', 'b.json']);
+    expect(order(NOW - 30 * 60 * 1000)).toEqual(['b.json', 'a.json']);
   });
 });
