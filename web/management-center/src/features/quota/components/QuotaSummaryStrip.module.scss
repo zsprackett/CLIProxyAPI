@@ -1,0 +1,112 @@
+/* Per-provider totals: one tile per provider, wrapping on narrow screens. */
+
+.strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.headline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.figure {
+  font-family: $font-mono;
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.figureOf {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.figureLabel {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* One segment per credential, filled to its tightest remaining window. */
+.segments {
+  display: flex;
+  gap: 4px;
+}
+
+.segment {
+  flex: 1 1 0;
+  height: 6px;
+  border-radius: $radius-full;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  overflow: hidden;
+}
+
+.segmentFill {
+  display: block;
+  height: 100%;
+  border-radius: $radius-full;
+}
+
+.toneHigh {
+  background: var(--viz-success);
+}
+
+.toneMedium {
+  background: var(--quota-medium-color);
+}
+
+.toneLow {
+  background: var(--viz-failure);
+}
+
+.toneUnknown {
+  background: transparent;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.expiring {
+  color: var(--quota-medium-color);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--text-tertiary);
+}

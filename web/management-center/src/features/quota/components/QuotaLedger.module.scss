@@ -1,0 +1,263 @@
+/* Ledger view: provider groups of dense credential rows. Telemetry is mono + tabular. */
+
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 6px;
+}
+
+.groupCount {
+  font-family: $font-mono;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 12px 16px;
+  min-width: 0;
+
+  & + & {
+    border-top: 1px solid var(--border-color);
+  }
+}
+
+@media (max-width: 860px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .windows {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* ---------- identity ---------- */
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: $font-mono;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.next {
+  padding: 1px 7px;
+  border-radius: $radius-full;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--bg-secondary);
+  background: var(--text-primary);
+  cursor: help;
+}
+
+.cooling {
+  color: var(--viz-failure);
+  font-weight: 600;
+}
+
+.observed {
+  color: var(--text-tertiary);
+  cursor: help;
+}
+
+.error {
+  font-size: 12px;
+  color: var(--viz-failure);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- windows ---------- */
+
+.windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px 18px;
+  min-width: 0;
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.windowHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.windowLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.windowPercent {
+  font-family: $font-mono;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.bar {
+  display: block;
+  height: 6px;
+  border-radius: $radius-full;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: $radius-full;
+  transition: width 360ms var(--ease-out-strong, ease);
+}
+
+.toneHigh {
+  background: var(--viz-success);
+}
+
+.toneMedium {
+  background: var(--quota-medium-color);
+}
+
+.toneLow {
+  background: var(--viz-failure);
+}
+
+.toneUnknown {
+  background: transparent;
+}
+
+.windowReset {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resetRelative {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+/* ---------- actions ---------- */
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    background: var(--bg-secondary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color, var(--text-primary));
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.spinning {
+  animation: ledger-spin 0.8s linear infinite;
+}
+
+@keyframes ledger-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barFill {
+    transition: none;
+  }
+
+  .spinning {
+    animation: none;
+  }
+}

@@ -1,0 +1,78 @@
+@use '../../../styles/mixins' as *;
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 0.8fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+
+  & + & {
+    border-top: 1px solid var(--border-color);
+  }
+
+  @include mobile {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
+.pool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.window {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.left {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.runway {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.toneHigh {
+  background: var(--viz-success);
+}
+
+.toneMedium {
+  background: var(--quota-medium-color);
+}
+
+.toneLow {
+  background: var(--viz-failure);
+}
+
+.toneUnknown {
+  background: var(--text-quaternary);
+}

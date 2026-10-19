@@ -1,0 +1,70 @@
+.heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.scroller {
+  overflow-x: auto;
+}
+
+.grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 520px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 40px repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  align-items: center;
+}
+
+.corner,
+.hour,
+.day {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hour {
+  text-align: left;
+}
+
+.cell {
+  height: 16px;
+  border-radius: 3px;
+  background: color-mix(
+    in srgb,
+    var(--primary-color) var(--intensity, 0%),
+    color-mix(in srgb, var(--text-primary) 5%, transparent)
+  );
+}
+
+.cellEmpty {
+  background: transparent;
+  border: 1px dashed var(--border-color);
+}
