@@ -600,3 +600,79 @@ func BenchmarkObserveClaudeHeaders(b *testing.B) {
 		s.ObserveResponseHeaders("claude", "claude-fable-5-1", h, now)
 	}
 }
+
+func TestQuotaSnapshotMergeSectionOkUsesTotalOrder(t *testing.T) {
+	t1 := snapshotNow
+	t2 := snapshotNow.Add(time.Hour)
+	t3 := snapshotNow.Add(2 * time.Hour)
+	t4 := snapshotNow.Add(3 * time.Hour)
+	failedWithValue := Section[string]{Status: SectionFailed, Value: new(string), ValueAt: t2, CheckedAt: t3, Error: "503"}
+	failedNoValue := FailedSection[string]("503", t3)
+	notApplicable := Section[string]{Status: SectionNotApplicable, CheckedAt: t3}
+	cases := []struct {
+		name      string
+		prev      Section[string]
+		okAt      time.Time
+		wantKept  bool
+		wantState SectionStatus
+	}{
+		{"failed with value, ok at T2", failedWithValue, t2, true, SectionFailed},
+		{"failed with value, ok at T4", failedWithValue, t4, false, SectionOK},
+		{"failed without value, ok at T1", failedNoValue, t1, true, SectionFailed},
+		{"failed without value, ok at T2", failedNoValue, t2, true, SectionFailed},
+		{"failed without value, ok at T4", failedNoValue, t4, false, SectionOK},
+		{"not_applicable, ok at T1", notApplicable, t1, true, SectionNotApplicable},
+		{"not_applicable, ok at T2", notApplicable, t2, true, SectionNotApplicable},
+		{"not_applicable, ok at T4", notApplicable, t4, false, SectionOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeSection(tc.prev, OKSection("ok", tc.okAt))
+			if got.Status != tc.wantState {
+				t.Fatalf("status = %q, want %q: %+v", got.Status, tc.wantState, got)
+			}
+			if tc.wantKept && !got.CheckedAt.Equal(tc.prev.CheckedAt) {
+				t.Fatalf("kept section changed: %+v", got)
+			}
+			if !tc.wantKept && !got.ValueAt.Equal(tc.okAt) {
+				t.Fatalf("ok section not applied: %+v", got)
+			}
+		})
+	}
+}
+
+func TestManagerUpdateOlderCloneKeepsNewerFailure(t *testing.T) {
+	at := snapshotNow
+	failedAt := at.Add(2 * time.Hour)
+	manager := NewManager(nil, nil, nil)
+	auth := &Auth{ID: "snapshot-older-clone", Provider: "claude", Attributes: map[string]string{"api_key": "k"}}
+	auth.QuotaSnapshot.apply(QuotaObservation{Provider: ProviderClaude, Source: SourcePoll, ObservedAt: at,
+		Extras: ClaudeExtras{Plan: OKSection("max", at)}})
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	stored, ok := manager.GetByID(auth.ID)
+	if !ok {
+		t.Fatal("auth not found")
+	}
+	oldClone := stored.Clone()
+
+	failing := stored.Clone()
+	failing.QuotaSnapshot = QuotaSnapshot{}
+	failing.QuotaSnapshot.apply(QuotaObservation{Provider: ProviderClaude, Source: SourcePoll, ObservedAt: failedAt,
+		Extras: ClaudeExtras{Plan: FailedSection[string]("503", failedAt)}})
+	if _, err := manager.Update(context.Background(), failing); err != nil {
+		t.Fatalf("update with failure: %v", err)
+	}
+	if _, err := manager.Update(context.Background(), oldClone); err != nil {
+		t.Fatalf("update with older clone: %v", err)
+	}
+	final, _ := manager.GetByID(auth.ID)
+	plan := final.QuotaSnapshot.Extras.(ClaudeExtras).Plan
+	if plan.Status != SectionFailed || !plan.CheckedAt.Equal(failedAt) {
+		t.Fatalf("older clone replaced a newer failure: %+v", plan)
+	}
+	if plan.Value == nil || *plan.Value != "max" {
+		t.Fatalf("last good value lost: %+v", plan)
+	}
+}
