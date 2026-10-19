@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -85,12 +86,15 @@ type Print struct {
 	format Format
 
 	// hashes is the flat, ordered prefix: [tools?][system...][settings?][items...]
-	// where items are Claude messages or Codex input items. Each hash is the first
+	// where items are Claude content blocks or Codex input items. Each hash is the first
 	// 8 bytes of sha256 over the segment's canonical bytes (see canonical rules in
 	// claude.go / codex.go). Capped at MaxSegments; beyond the cap the tail is
 	// folded into one final hash and truncatedTail is set.
 	hashes []uint64
 	layout layout
+	// msgStarts (Claude only) is the item index where each message begins,
+	// ascending, starting at 0. It maps a block back to its message for reports.
+	msgStarts []uint32
 
 	toolCount     uint16 // number of tools, for "tools changed (37 -> 38)"
 	blocks        uint32 // Claude: total content blocks across messages (lookback rule)
@@ -108,11 +112,12 @@ type layout struct {
 	system   uint16 // Claude system blocks (a volatile block keeps its slot with a constant hash); Codex: 0
 	settings uint8  // 0 or 1 (Claude only)
 	instr    uint8  // 0 or 1 (Codex only)
-	items    uint32 // messages (Claude) or input items (Codex)
+	items    uint32 // content blocks (Claude) or input items (Codex)
 }
 
-// MaxSegments bounds one Print to 4096 hashes (32 KiB). Claude Code sessions are
-// compacted long before this; the cap only guards pathological clients.
+// MaxSegments bounds one Print to 4096 hashes (32 KiB). The largest Claude Code
+// request seen held about 1,500 content blocks; the cap only guards pathological
+// clients.
 const MaxSegments = 4096
 
 // volatileSlot is the constant hash stored in the prefix for a volatile block.
@@ -175,6 +180,23 @@ func (p *Print) Breakpoints() int {
 		return 0
 	}
 	return int(p.breakpoints)
+}
+
+// SharedPrefix returns how many leading hashes p and other have in common.
+// It is 0 across formats and for incremental (delta) Codex bodies, whose input
+// is not a full prefix. The session tracker uses it to pick, among one model's
+// lanes, the conversation a request continues.
+func (p *Print) SharedPrefix(other *Print) int {
+	if p == nil || other == nil || p.format != other.format || p.incremental || other.incremental {
+		return 0
+	}
+	n := min(len(p.hashes), len(other.hashes))
+	for i := 0; i < n; i++ {
+		if p.hashes[i] != other.hashes[i] {
+			return i
+		}
+	}
+	return n
 }
 
 // DivergenceKind classifies how the current print relates to the previous one.
@@ -298,7 +320,9 @@ func (p *Print) refAt(i int) SegmentRef {
 	if p.format == FormatCodexResponses {
 		return SegmentRef{Kind: SegmentInput, Index: i}
 	}
-	return SegmentRef{Kind: SegmentMessage, Index: i}
+	// The message holding block i is the last one that starts at or before it.
+	msg := sort.Search(len(p.msgStarts), func(m int) bool { return p.msgStarts[m] > uint32(i) }) - 1
+	return SegmentRef{Kind: SegmentMessage, Index: max(msg, 0)}
 }
 
 // fold enforces MaxSegments: the tail beyond the cap is hashed into one final
@@ -325,21 +349,27 @@ func (p *Print) fold() {
 	p.layout.instr = uint8(min(int(p.layout.instr), remaining))
 	remaining -= int(p.layout.instr)
 	p.layout.items = uint32(remaining)
+	for len(p.msgStarts) > 0 && p.msgStarts[len(p.msgStarts)-1] >= p.layout.items {
+		p.msgStarts = p.msgStarts[:len(p.msgStarts)-1]
+	}
 }
 
-const binaryVersion = 1
+// binaryVersion 2 hashes Claude content blocks and appends msgStarts. A version 1
+// print hashed whole messages, so it cannot be compared with a version 2 print:
+// UnmarshalBinary rejects it and the tracker skips that lane on restore.
+const binaryVersion = 2
 
 // binaryHeaderLen is the fixed-size part of MarshalBinary's output.
 const binaryHeaderLen = 40
 
 // MarshalBinary encodes the print for the request-log snapshot (baselines of
-// recently active sessions only). Layout: version byte, header fields, then
-// len(hashes) little-endian uint64s.
+// recently active sessions only). Layout: version byte, header fields,
+// len(hashes) little-endian uint64s, then a uint32 count and the msgStarts.
 func (p *Print) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("prompt: marshal nil print")
 	}
-	out := make([]byte, 0, binaryHeaderLen+8*len(p.hashes))
+	out := make([]byte, 0, binaryHeaderLen+8*len(p.hashes)+4+4*len(p.msgStarts))
 	out = append(out, binaryVersion, byte(p.format))
 	out = binary.LittleEndian.AppendUint16(out, p.toolCount)
 	out = binary.LittleEndian.AppendUint32(out, p.blocks)
@@ -360,6 +390,10 @@ func (p *Print) MarshalBinary() ([]byte, error) {
 	out = binary.LittleEndian.AppendUint32(out, uint32(len(p.hashes)))
 	for _, x := range p.hashes {
 		out = binary.LittleEndian.AppendUint64(out, x)
+	}
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(p.msgStarts)))
+	for _, x := range p.msgStarts {
+		out = binary.LittleEndian.AppendUint32(out, x)
 	}
 	return out, nil
 }
@@ -387,7 +421,12 @@ func (p *Print) UnmarshalBinary(data []byte) error {
 	q.layout.instr = data[31]
 	q.layout.items = binary.LittleEndian.Uint32(data[32:])
 	n := int(binary.LittleEndian.Uint32(data[36:]))
-	if n > MaxSegments || len(data) != binaryHeaderLen+8*n {
+	starts := binaryHeaderLen + 8*n
+	if n > MaxSegments || len(data) < starts+4 {
+		return errors.New("prompt: print encoding length mismatch")
+	}
+	m := int(binary.LittleEndian.Uint32(data[starts:]))
+	if m > n || len(data) != starts+4+4*m {
 		return errors.New("prompt: print encoding length mismatch")
 	}
 	if int(q.layout.tools)+int(q.layout.system)+int(q.layout.settings)+int(q.layout.instr)+int(q.layout.items) != n {
@@ -396,6 +435,15 @@ func (p *Print) UnmarshalBinary(data []byte) error {
 	q.hashes = make([]uint64, n)
 	for i := range q.hashes {
 		q.hashes[i] = binary.LittleEndian.Uint64(data[binaryHeaderLen+8*i:])
+	}
+	if m > 0 {
+		q.msgStarts = make([]uint32, m)
+		for i := range q.msgStarts {
+			q.msgStarts[i] = binary.LittleEndian.Uint32(data[starts+4+4*i:])
+			if q.msgStarts[i] >= q.layout.items || (i == 0 && q.msgStarts[i] != 0) || (i > 0 && q.msgStarts[i] <= q.msgStarts[i-1]) {
+				return errors.New("prompt: print message starts out of order")
+			}
+		}
 	}
 	*p = q
 	return nil

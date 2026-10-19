@@ -36,9 +36,14 @@ const billingHeaderPrefix = "x-anthropic-billing-header:"
 //     Anthropic documents that changing either invalidates the message cache while
 //     tools and system stay cached, so it sits between system and messages.
 //
-//   - messages: one hash per message over "role" plus content. String content ->
-//     the string bytes. Array content -> for each block, members except
-//     "cache_control". blocks += number of content blocks (string content counts 1).
+//   - messages: one hash per content block over "role", a first-block flag, and
+//     the block's members except "cache_control". String content is one block of
+//     the string bytes; a message with no blocks still gets one hash. The flag
+//     makes a block that moves to the next message a change. msgStarts records
+//     the item index where each message begins, so reports still name messages.
+//     Hashing blocks, not messages, lets the tracker tell apart two transcripts
+//     that share one message (the auto-mode classifier puts a whole transcript
+//     in messages[1]). blocks += number of content blocks (string content counts 1).
 //     The moving last-message breakpoint therefore never shows as a change.
 //     The injected currentDate reminder IS hashed: when the date rolls over, message 0
 //     really changes and the report says so.
@@ -110,24 +115,40 @@ func claudePrint(body []byte) *Print {
 
 	blocks := 0
 	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
-		h.reset()
-		h.write(msg.Get("role").Raw)
-		h.sep()
+		role := msg.Get("role").Raw
+		start := len(p.hashes)
+		p.msgStarts = append(p.msgStarts, uint32(p.layout.items))
+		blockHash := func(raw string, members gjson.Result) {
+			h.reset()
+			h.write(role)
+			h.sep()
+			if len(p.hashes) == start {
+				h.write("first")
+			}
+			h.sep()
+			if members.Exists() {
+				note(h.writeMembers(members))
+			} else {
+				h.write(raw)
+			}
+			p.hashes = append(p.hashes, h.sum())
+			p.layout.items++
+		}
 		content := msg.Get("content")
 		switch {
 		case content.Type == gjson.String:
-			h.write(content.Raw)
+			blockHash(content.Raw, gjson.Result{})
 			blocks++
 		case content.IsArray():
 			content.ForEach(func(_, block gjson.Result) bool {
-				note(h.writeMembers(block))
-				h.sep()
+				blockHash("", block)
 				blocks++
 				return true
 			})
 		}
-		p.hashes = append(p.hashes, h.sum())
-		p.layout.items++
+		if len(p.hashes) == start {
+			blockHash("", gjson.Result{})
+		}
 		return true
 	})
 
