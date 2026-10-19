@@ -438,8 +438,8 @@ func TestQuotaSnapshotCloneIsIndependent(t *testing.T) {
 	}
 }
 
-func stringPtr(v string) *string { return &v }
-func intPtr(v int) *int          { return &v }
+func stringPtr(v string) *string  { return &v }
+func intPtr(v int) *int           { return &v }
 func floatPtr(v float64) *float64 { return &v }
 
 func TestQuotaSnapshotApplyReportsProviderOnZeroSnapshot(t *testing.T) {

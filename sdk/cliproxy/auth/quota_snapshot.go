@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -256,12 +257,33 @@ func mergeSection[T any](prev, next Section[T]) Section[T] {
 	}
 }
 
+// cloneSection copies a section whose value holds no pointers or slices.
 func cloneSection[T any](s Section[T]) Section[T] {
 	if s.Value != nil {
 		value := *s.Value
 		s.Value = &value
 	}
 	return s
+}
+
+// deepCloner is a section value that owns pointers or slices.
+type deepCloner[T any] interface{ clone() T }
+
+// cloneSectionDeep copies a section through the value's own clone.
+func cloneSectionDeep[T deepCloner[T]](s Section[T]) Section[T] {
+	if s.Value != nil {
+		value := (*s.Value).clone()
+		s.Value = &value
+	}
+	return s
+}
+
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // QuotaExtras is sealed: only the four provider structs below implement it.
@@ -305,11 +327,19 @@ type CodexAccess struct {
 	LimitReached *bool `json:"limit_reached"`
 }
 
+func (a CodexAccess) clone() CodexAccess {
+	return CodexAccess{Allowed: clonePtr(a.Allowed), LimitReached: clonePtr(a.LimitReached)}
+}
+
 // CodexCredits is the credits block of a Codex usage payload.
 type CodexCredits struct {
 	HasCredits *bool   `json:"has_credits"`
 	Unlimited  *bool   `json:"unlimited"`
 	Balance    *string `json:"balance"`
+}
+
+func (c CodexCredits) clone() CodexCredits {
+	return CodexCredits{HasCredits: clonePtr(c.HasCredits), Unlimited: clonePtr(c.Unlimited), Balance: clonePtr(c.Balance)}
 }
 
 // CodexSubscription is the /subscriptions result.
@@ -332,6 +362,14 @@ type CodexResetCredits struct {
 	Credits             []CodexResetCredit `json:"credits"`
 }
 
+func (c CodexResetCredits) clone() CodexResetCredits {
+	return CodexResetCredits{
+		Available:           clonePtr(c.Available),
+		ApplicableAvailable: clonePtr(c.ApplicableAvailable),
+		Credits:             slices.Clone(c.Credits),
+	}
+}
+
 // CodexExtras holds the Codex fields outside the windows.
 type CodexExtras struct {
 	Plan         Section[string]            `json:"plan"`
@@ -346,10 +384,10 @@ func (CodexExtras) isQuotaExtras()     {}
 func (e CodexExtras) clone() QuotaExtras {
 	return CodexExtras{
 		Plan:         cloneSection(e.Plan),
-		Access:       cloneSection(e.Access),
-		Credits:      cloneSection(e.Credits),
+		Access:       cloneSectionDeep(e.Access),
+		Credits:      cloneSectionDeep(e.Credits),
 		Subscription: cloneSection(e.Subscription),
-		ResetCredits: cloneSection(e.ResetCredits),
+		ResetCredits: cloneSectionDeep(e.ResetCredits),
 	}
 }
 func (e CodexExtras) mergeFrom(prev QuotaExtras) QuotaExtras {
@@ -384,6 +422,11 @@ type XAIWeekly struct {
 	ProductUsage []XAIProductUsage `json:"product_usage"`
 }
 
+func (w XAIWeekly) clone() XAIWeekly {
+	w.ProductUsage = slices.Clone(w.ProductUsage)
+	return w
+}
+
 // XAIMonthly is the monthly billing period in cents.
 type XAIMonthly struct {
 	LimitCents          *float64 `json:"limit_cents"`
@@ -394,6 +437,16 @@ type XAIMonthly struct {
 	PrepaidBalanceCents *float64 `json:"prepaid_balance_cents"`
 	PeriodStart         Instant  `json:"period_start"`
 	PeriodEnd           Instant  `json:"period_end"`
+}
+
+func (m XAIMonthly) clone() XAIMonthly {
+	m.LimitCents = clonePtr(m.LimitCents)
+	m.UsedCents = clonePtr(m.UsedCents)
+	m.IncludedUsedCents = clonePtr(m.IncludedUsedCents)
+	m.OnDemandCapCents = clonePtr(m.OnDemandCapCents)
+	m.OnDemandUsedCents = clonePtr(m.OnDemandUsedCents)
+	m.PrepaidBalanceCents = clonePtr(m.PrepaidBalanceCents)
+	return m
 }
 
 // XAIAccount is the plan and tier of the account.
@@ -424,8 +477,8 @@ func (XAIExtras) isQuotaExtras()     {}
 func (e XAIExtras) clone() QuotaExtras {
 	return XAIExtras{
 		Access:     e.Access,
-		Weekly:     cloneSection(e.Weekly),
-		Monthly:    cloneSection(e.Monthly),
+		Weekly:     cloneSectionDeep(e.Weekly),
+		Monthly:    cloneSectionDeep(e.Monthly),
 		Account:    cloneSection(e.Account),
 		PaidHealth: cloneSection(e.PaidHealth),
 	}
