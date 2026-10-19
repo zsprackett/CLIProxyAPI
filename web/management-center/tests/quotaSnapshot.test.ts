@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import i18n from '@/i18n';
-import { observedLedgerData } from '@/features/quota/ledgerModel';
+import { observedLedgerData, resolveLedgerRow } from '@/features/quota/ledgerModel';
 import { buildTimelineLane } from '@/features/quota/quotaTimelineModel';
 import { nextRecoveryMs } from '@/features/quota/resetSchedule';
 import type { QuotaSnapshot, QuotaWindow } from '@/features/quota/snapshot/types';
-import { WindowList } from '@/features/quota/snapshot/WindowList';
+import { LedgerWindowList, WindowList } from '@/features/quota/snapshot/WindowList';
 import { readQuotaSnapshot } from '@/features/quota/snapshot/windows';
 import type { AuthFileItem } from '@/types';
 
@@ -274,6 +274,51 @@ describe('stale and exhausted windows', () => {
     expect(lane.limits.map((limit) => [limit.labelKey, limit.remaining])).toEqual([
       ['codex_quota.primary_window', 0],
       ['codex_quota.secondary_window', 70],
+    ]);
+  });
+
+  test('a passed reset settles a known percent to full and leaves an unknown one awaiting data', () => {
+    const claude: QuotaSnapshot = {
+      provider: 'claude',
+      windows: [
+        window({
+          id: 'five_hour',
+          class: 'claude:5h',
+          used_percent: null,
+          limit_reached: true,
+          reset_at: iso(NOW - HOUR),
+          period_seconds: 18000,
+        }),
+        window({
+          id: 'seven_day',
+          class: 'claude:7d',
+          used_percent: 60,
+          reset_at: iso(NOW - HOUR),
+        }),
+      ],
+      extras: null,
+      last_poll: null,
+      updated_at: iso(NOW - 2 * HOUR),
+    };
+    expect(renderedWindows(render(claude))).toEqual([
+      { label: '5-hour limit', percent: 'Reset, awaiting data', limitReached: false },
+      { label: '7-day limit', percent: '100%', limitReached: false },
+    ]);
+
+    const live = {
+      status: 'success',
+      windows: [
+        { id: 'five-hour', label: 'Live 5h', usedPercent: null, resetAtMs: NOW - HOUR },
+        { id: 'seven-day', label: 'Live 7d', usedPercent: 60, resetAtMs: NOW - HOUR },
+      ],
+    };
+    const row = resolveLedgerRow('claude', { name: 'c.json', type: 'claude' }, live, NOW);
+    const markup = renderToStaticMarkup(
+      createElement(LedgerWindowList, { windows: row.windows, nowMs: NOW })
+    );
+    expect(renderedWindows(markup)).toEqual([
+      { label: 'Live 5h', percent: 'Reset, awaiting data', limitReached: false },
+      { label: 'Live 7d', percent: '100%', limitReached: false },
     ]);
   });
 
