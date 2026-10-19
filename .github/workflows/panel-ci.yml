@@ -1,0 +1,42 @@
+name: panel-ci
+
+on:
+  pull_request:
+    paths:
+      - 'web/management-center/**'
+      - '.github/workflows/panel-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/management-center/**'
+      - '.github/workflows/panel-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/management-center
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify
+        run: bun run verify

@@ -185,23 +185,17 @@ describe('provider model options', () => {
 
   test('gates fields by provider capability', () => {
     const vertex = render('vertex');
-    expect(vertex).toContain('providersPage.modelOptions.displayName');
-    expect(vertex).toContain('providersPage.modelOptions.forceMapping');
-    expect(vertex).not.toContain('providersPage.modelOptions.maxContextLength');
-    expect(vertex).not.toContain('providersPage.modelOptions.isCompat');
+    expect(vertex).toContain('Display name');
+    expect(vertex).toContain('Rewrite response model to alias');
+    expect(vertex).not.toContain('Context length');
+    expect(vertex).not.toContain('Compatibility mode');
     for (const brand of ['gemini', 'codex', 'openaiCompatibility'] as const) {
       const html = render(brand);
-      expect(html).toContain('providersPage.modelOptions.maxContextLength');
-      expect(html).toContain('providersPage.modelOptions.isCompat');
-      expect(html.includes('providersPage.modelOptions.supportConfigurationUpdate')).toBe(
-        brand === 'codex'
-      );
-      expect(html.includes('providersPage.modelOptions.inputModalitiesText')).toBe(
-        brand === 'openaiCompatibility'
-      );
-      expect(html.includes('providersPage.modelOptions.useMaxCompletionTokens')).toBe(
-        brand === 'openaiCompatibility'
-      );
+      expect(html).toContain('Context length');
+      expect(html).toContain('Compatibility mode');
+      expect(html.includes('Allow configuration updates')).toBe(brand === 'codex');
+      expect(html.includes('Input modalities')).toBe(brand === 'openaiCompatibility');
+      expect(html.includes('Use max_completion_tokens')).toBe(brand === 'openaiCompatibility');
     }
   });
 
