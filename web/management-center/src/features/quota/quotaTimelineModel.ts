@@ -355,11 +355,12 @@ function snapshotLane(
         typeof window.period_seconds === 'number' && window.period_seconds > 0
           ? window.period_seconds / 3600
           : null,
-      remaining: window.limit_reached
-        ? 0
-        : typeof window.used_percent === 'number'
+      remaining:
+        typeof window.used_percent === 'number'
           ? clampPercent(100 - window.used_percent)
-          : null,
+          : window.limit_reached
+            ? 0
+            : null,
     };
   });
   const candidates = windows.filter(

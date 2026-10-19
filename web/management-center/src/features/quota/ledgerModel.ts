@@ -32,7 +32,11 @@ export interface LedgerWindow {
   /** Upcoming reset instant; null when no reset is pending. */
   resetAtMs: number | null;
   periodHours: number | null;
-  /** Upstream reported the window exhausted; `remaining` is then 0. */
+  /**
+   * Upstream reported the window exhausted and `remaining` is 0. The backend
+   * copies `limit_reached` onto every slot of a Codex namespace, so a window
+   * with a known percent above 0 is not exhausted.
+   */
   limitReached?: boolean;
   /** When the data went stale because the sub-request that owns it failed. */
   staleSinceMs?: number | null;
@@ -229,13 +233,15 @@ export function snapshotLedgerWindows(
   nowMs: number
 ): LedgerWindow[] {
   return windows.map((window) => {
-    const limitReached = window.limit_reached === true;
     const used = isFiniteNumber(window.used_percent) ? window.used_percent : null;
+    const remaining =
+      used !== null ? clampPercent(100 - used) : window.limit_reached === true ? 0 : null;
+    const limitReached = window.limit_reached === true && remaining === 0;
     return settleWindow(
       {
         id: window.id,
         ...quotaWindowLabel(provider, window),
-        remaining: limitReached ? 0 : used === null ? null : clampPercent(100 - used),
+        remaining,
         resetAtMs: parseIsoMs(window.reset_at),
         periodHours: isFiniteNumber(window.period_seconds) ? window.period_seconds / 3600 : null,
         limitReached,
