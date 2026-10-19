@@ -35,7 +35,8 @@ func requestAuthFilesCooldowns(t *testing.T, h *Handler, query string) authFiles
 	t.Helper()
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/auth-files"+query, nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v8/management/credentials"+query, nil)
+	ctx.Set(ConfigV8ContextKey, true)
 	h.ListAuthFiles(ctx)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
