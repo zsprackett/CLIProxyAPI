@@ -72,26 +72,56 @@ const CLAUDE_LABELED_IDS = new Set([
   'seven_day_cowork',
 ]);
 
-const CODEX_CLASS_LABELS: Record<string, string> = {
-  'codex:5h': 'codex_quota.primary_window',
-  'codex:weekly': 'codex_quota.secondary_window',
-  'codex:monthly': 'codex_quota.team_secondary_window',
+const CODEX_CLASS_SUFFIXES: Record<string, string> = {
+  'codex:5h': 'primary_window',
+  'codex:weekly': 'secondary_window',
+  'codex:monthly': 'team_secondary_window',
 };
 
-const WEEK_SECONDS = 7 * 24 * 60 * 60;
+/** Display-only windows (class `""`) name a period by exact lookup, never by threshold. */
+const PERIOD_SECONDS_SUFFIXES: Record<number, string> = {
+  18000: 'primary_window',
+  604800: 'secondary_window',
+};
+
+/**
+ * The period label of a Codex window: its class, else its period by lookup,
+ * else its formatted period; null when the period is unknown.
+ */
+const codexPeriodLabel = (
+  window: QuotaWindow,
+  prefix: string,
+  params: Record<string, string | number> = {}
+): QuotaWindowLabel | null => {
+  const period = window.period_seconds;
+  const suffix = window.class
+    ? CODEX_CLASS_SUFFIXES[window.class]
+    : typeof period === 'number'
+      ? PERIOD_SECONDS_SUFFIXES[period]
+      : undefined;
+  if (suffix) return { labelKey: `codex_quota.${prefix}${suffix}`, labelParams: params };
+  if (typeof period === 'number' && Number.isFinite(period) && period > 0) {
+    return { labelKey: `codex_quota.${prefix}period_window`, labelParams: { ...params, period } };
+  }
+  return null;
+};
 
 const codexDisplayLabel = (window: QuotaWindow): QuotaWindowLabel | null => {
   const match = /^(code_review|additional\.(.+))\.(primary|secondary)$/.exec(window.id);
   if (!match) return null;
-  const [, group, limitName, slot] = match;
-  const monthly = (window.period_seconds ?? 0) > WEEK_SECONDS;
-  const suffix =
-    slot === 'primary' ? 'primary_window' : monthly ? 'team_secondary_window' : 'secondary_window';
-  if (group === 'code_review') return { labelKey: `codex_quota.code_review_${suffix}` };
-  return {
-    labelKey: `codex_quota.additional_${suffix}`,
-    labelParams: { name: window.label || limitName },
-  };
+  const [, group, limitName] = match;
+  if (group === 'code_review') {
+    return (
+      codexPeriodLabel(window, 'code_review_') ?? { labelKey: 'codex_quota.code_review_window' }
+    );
+  }
+  const params = { name: window.label || limitName };
+  return (
+    codexPeriodLabel(window, 'additional_', params) ?? {
+      labelKey: 'codex_quota.additional_window',
+      labelParams: params,
+    }
+  );
 };
 
 /** The i18n label of a snapshot window; unknown ids fall back to the upstream label or the id. */
@@ -104,8 +134,8 @@ export function quotaWindowLabel(
   }
   if (provider === 'codex') {
     if (window.id === 'primary' || window.id === 'secondary') {
-      const labelKey = CODEX_CLASS_LABELS[window.class];
-      if (labelKey) return { labelKey };
+      const labelKey = CODEX_CLASS_SUFFIXES[window.class];
+      if (labelKey) return { labelKey: `codex_quota.${labelKey}` };
     }
     const display = codexDisplayLabel(window);
     if (display) return display;
