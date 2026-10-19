@@ -13,6 +13,7 @@ go run ./cmd/server # Run dev server
 go test ./... # Run all tests
 go test -v -run TestName ./path/to/pkg # Run single test
 go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRED after changes)
+./build-panel.sh # Build web/management-center into static/management.html (needs bun 1.3.14)
 ```
 - Common flags: `--config <path>`, `--tui`, `--standalone`, `--local-model`, `--no-browser`, `--oauth-callback-port <port>`
 
@@ -40,6 +41,7 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - `internal/tui/` — Bubbletea terminal UI (`--tui`, `--standalone`)
 - `sdk/cliproxy/` — Embeddable SDK entry (service/builder/watchers/pipeline)
 - `test/` — Cross-module integration tests
+- `web/management-center/` — Management Center web UI (React + Vite), imported as a git subtree. Read its own `AGENTS.md` before editing. Pull upstream UI changes with `git subtree pull --prefix web/management-center <remote> main`
 
 ## Code Conventions
 - Keep changes small and simple (KISS)
