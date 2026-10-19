@@ -21,7 +21,13 @@ var claudeHeaderWindows = []struct {
 // The 7d_oi window is the scoped weekly limit of the model that produced the
 // response, so it is dropped when the model has no scope.
 func claudeHeadersObservation(h http.Header, model string, now time.Time) (QuotaObservation, bool) {
-	scope := claudeScopeOf(model)
+	return claudeHeadersObservationScoped(h, claudeScopeOf(model), now)
+}
+
+// claudeHeadersObservationScoped is claudeHeadersObservation with the scope of
+// the 7d_oi window already decided. The usage poll has no model, and its 7d_oi
+// block describes the Fable family, so the poll adapter passes that scope.
+func claudeHeadersObservationScoped(h http.Header, scope string, now time.Time) (QuotaObservation, bool) {
 	obs := QuotaObservation{Provider: ProviderClaude, Source: SourceHeaders, ObservedAt: now}
 	for _, spec := range claudeHeaderWindows {
 		if spec.scoped && scope == "" {
