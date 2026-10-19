@@ -322,6 +322,39 @@ describe('stale and exhausted windows', () => {
     ]);
   });
 
+  test('Codex code review and additional windows are labeled by their period, not their slot', () => {
+    const codex: QuotaSnapshot = {
+      provider: 'codex',
+      windows: [
+        window({ id: 'code_review.primary', class: '', used_percent: 10, period_seconds: 604800 }),
+        window({ id: 'code_review.secondary', class: '', used_percent: 10, period_seconds: null }),
+        window({
+          id: 'additional.spark.primary',
+          class: '',
+          label: 'Spark',
+          used_percent: 10,
+          period_seconds: 18000,
+        }),
+        window({
+          id: 'additional.spark.secondary',
+          class: '',
+          label: 'Spark',
+          used_percent: 10,
+          period_seconds: 30 * 86400,
+        }),
+      ],
+      extras: null,
+      last_poll: null,
+      updated_at: iso(NOW - HOUR),
+    };
+    expect(renderedWindows(render(codex)).map((rendered) => rendered.label)).toEqual([
+      'Code review weekly limit',
+      'Code review limit',
+      'Spark 5-hour limit',
+      'Spark limit (30 days)',
+    ]);
+  });
+
   test('an empty snapshot or another provider reads as no data', () => {
     const empty = { provider: '', windows: [], extras: null, last_poll: null, updated_at: null };
     expect(readQuotaSnapshot('kimi', empty)).toBeNull();
