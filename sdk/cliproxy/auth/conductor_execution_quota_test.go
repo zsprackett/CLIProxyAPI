@@ -121,11 +121,13 @@ func TestExecutionAttemptsDoNotReuseQuotaResponseHeaders(t *testing.T) {
 			if !okFirst || first == nil || !okSecond || second == nil {
 				t.Fatalf("auth lookup failed: first=%#v second=%#v", first, second)
 			}
-			if got := first.Quota.Signals["X-Codex-Primary-Used-Percent"]; got != "91" {
-				t.Fatalf("first attempt observation = %q, want 91; quota=%#v", got, first.Quota)
+			if windows := first.QuotaSnapshot.Windows; len(windows) != 1 || windows[0].ID != "primary" {
+				t.Fatalf("first attempt observation = %+v, want the primary window", first.QuotaSnapshot)
+			} else if used, known := windows[0].Used.Get(); !known || used != 91 {
+				t.Fatalf("first attempt primary used = %v (known %t), want 91", used, known)
 			}
-			if len(second.Quota.Signals) != 0 || !second.Quota.ObservedAt.IsZero() {
-				t.Fatalf("pre-response failure inherited earlier attempt headers: %#v", second.Quota)
+			if !second.QuotaSnapshot.IsZero() {
+				t.Fatalf("pre-response failure inherited earlier attempt headers: %+v", second.QuotaSnapshot)
 			}
 			if headers := internallogging.GetResponseHeaders(ctx); len(headers) != 0 {
 				t.Fatalf("attempt headers leaked into request holder: %#v", headers)

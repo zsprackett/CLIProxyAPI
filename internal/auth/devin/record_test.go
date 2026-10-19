@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 func TestCreateAuthRecord(t *testing.T) {
@@ -55,8 +57,20 @@ func TestCreateAuthRecord(t *testing.T) {
 					t.Errorf("field %s differs between credential attributes and metadata", key)
 				}
 			}
-			if record.Quota.Signals["daily_quota_remaining_percent"] != "100%" || record.Quota.Signals["weekly_quota_remaining_percent"] != "50%" || record.Quota.Signals["daily_quota_reset_at"] == "" {
-				t.Fatalf("unexpected quota signals: %v", record.Quota.Signals)
+			windows := map[coreauth.WindowID]coreauth.QuotaWindowObs{}
+			for _, w := range record.QuotaSnapshot.Windows {
+				windows[w.ID] = w
+			}
+			daily, weekly := windows["daily"], windows["weekly"]
+			if used, known := daily.Used.Get(); !known || used != 0 || daily.ResetAt.IsZero() {
+				t.Fatalf("unexpected daily window: %+v", daily)
+			}
+			if used, known := weekly.Used.Get(); !known || used != 50 {
+				t.Fatalf("unexpected weekly window: %+v", weekly)
+			}
+			extras, ok := record.QuotaSnapshot.Extras.(coreauth.DevinExtras)
+			if !ok || extras.Plan.Value == nil || extras.Plan.Value.Name != "Pro" {
+				t.Fatalf("unexpected devin extras: %+v", record.QuotaSnapshot.Extras)
 			}
 		})
 	}

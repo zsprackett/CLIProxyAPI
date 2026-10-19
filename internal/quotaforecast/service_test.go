@@ -16,15 +16,16 @@ import (
 )
 
 func claudeAuth(id string, utilization float64, observed, reset time.Time) *coreauth.Auth {
-	return &coreauth.Auth{
+	auth := &coreauth.Auth{
 		ID:       id,
 		Provider: "claude",
 		FileName: "/auths/" + id + ".json",
-		Quota: coreauth.QuotaState{ObservedAt: observed, Signals: map[string]string{
-			http.CanonicalHeaderKey("Anthropic-Ratelimit-Unified-7d-Utilization"): strconv.FormatFloat(utilization, 'f', -1, 64),
-			http.CanonicalHeaderKey("Anthropic-Ratelimit-Unified-7d-Reset"):       strconv.FormatInt(reset.Unix(), 10),
-		}},
 	}
+	auth.QuotaSnapshot.ObserveResponseHeaders("claude", "", http.Header{
+		"Anthropic-Ratelimit-Unified-7d-Utilization": []string{strconv.FormatFloat(utilization, 'f', -1, 64)},
+		"Anthropic-Ratelimit-Unified-7d-Reset":       []string{strconv.FormatInt(reset.Unix(), 10)},
+	}, observed)
+	return auth
 }
 
 func testService(now *time.Time) *Service {

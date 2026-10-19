@@ -13,8 +13,10 @@ import (
 
 // QuotaPoller is implemented by executors that can fetch a credential's current
 // quota without consuming it. The returned headers use the same names as the
-// passive response-header observation so both feed one snapshot. A nil header
-// with a nil error means the credential has nothing to poll (e.g. API keys).
+// passive response-header observation. A nil header with a nil error means the
+// credential has nothing to poll (e.g. API keys).
+//
+// P2 and P3 change this to return a QuotaObservation and delete fromHeadersAdapter.
 type QuotaPoller interface {
 	PollQuota(ctx context.Context, auth *Auth) (http.Header, error)
 }
@@ -139,20 +141,21 @@ func (m *Manager) pollQuotaOnce(ctx context.Context, target quotaPollTarget) {
 		return
 	}
 	now := time.Now()
-	m.observePolledQuota(target.auth.ID, headers, now)
-	m.clearCooldownIfPollShowsCapacity(ctx, target.auth, headers, pollStart, baseline, now)
+	obs, ok := fromHeadersAdapter(target.auth.Provider, headers, now)
+	if !ok {
+		return
+	}
+	obs.Poll = &PollStatus{At: now, Trigger: PollBackground}
+	m.observePolledQuota(target.auth.ID, obs)
+	m.clearCooldownIfPollShowsCapacity(ctx, target.auth, obs, pollStart, baseline, now)
 }
 
 // clearCooldownIfPollShowsCapacity lifts a quota cooldown once the polled usage
 // shows room. The guard compares cooldown records with the pre-poll baseline
 // under m.mu, so a failure that landed while the poll was in flight keeps its
 // block; the next poll retries.
-func (m *Manager) clearCooldownIfPollShowsCapacity(ctx context.Context, target *Auth, headers http.Header, pollStart time.Time, baseline []CooldownStateRecord, now time.Time) {
-	if m.HomeEnabled() {
-		return
-	}
-	var polled QuotaState
-	if !polled.ObserveResponseHeadersForProvider(target.Provider, headers, now) || !pollShowsQuotaCapacity(target.Provider, polled) {
+func (m *Manager) clearCooldownIfPollShowsCapacity(ctx context.Context, target *Auth, obs QuotaObservation, pollStart time.Time, baseline []CooldownStateRecord, now time.Time) {
+	if m.HomeEnabled() || !pollShowsQuotaCapacity(obs) {
 		return
 	}
 	guard := func(auth *Auth) bool {
@@ -168,22 +171,29 @@ func (m *Manager) clearCooldownIfPollShowsCapacity(ctx context.Context, target *
 		return
 	}
 	fields := log.Fields{"auth_id": target.ID, "provider": target.Provider}
-	for _, window := range quotaWindowsFromSnapshot(strings.ToLower(strings.TrimSpace(target.Provider)), polled, false) {
-		fields["used_percent_"+window.Class] = window.UsedPercent
+	for _, window := range obs.Windows {
+		if used, known := window.Used.Get(); known {
+			if class := window.Class(obs.Provider); class != "" {
+				fields["used_percent_"+string(class)] = used
+			}
+		}
 	}
 	log.WithFields(fields).Info("quota poll shows capacity; cleared quota cooldown")
 }
 
-// observePolledQuota records polled quota headers as the credential-level
-// observation snapshot, exactly as response headers from real traffic would be.
+// observePolledQuota applies a poll observation to the credential's snapshot.
 // Cooldown and scheduling state is left untouched.
-func (m *Manager) observePolledQuota(authID string, headers http.Header, now time.Time) bool {
+func (m *Manager) observePolledQuota(authID string, obs QuotaObservation) bool {
 	if m == nil {
 		return false
 	}
+	now := obs.ObservedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
 	m.mu.Lock()
 	auth := m.auths[authID]
-	if auth == nil || !auth.Quota.ObserveResponseHeadersForProvider(auth.Provider, headers, now) {
+	if auth == nil || !auth.QuotaSnapshot.apply(obs) {
 		m.mu.Unlock()
 		return false
 	}
@@ -203,4 +213,127 @@ func (m *Manager) observePolledQuota(authID string, headers http.Header, now tim
 		m.persistCooldownStates(context.Background())
 	}
 	return true
+}
+
+/* ------------------------------------------------------- temporary adapter */
+
+// fromHeadersAdapter turns the header form the P1 pollers still return into a
+// poll observation. Claude and Codex go through the passive header parsers;
+// xAI has its own billing header form. Each window is attributed to the
+// provider's poll section, so the next poll can retire a window it no longer
+// returns without touching header-sourced windows.
+//
+// P2 (Claude, Codex) and P3 (xAI) delete this adapter when the pollers return a
+// QuotaObservation directly.
+func fromHeadersAdapter(provider string, headers http.Header, now time.Time) (QuotaObservation, bool) {
+	kind, ok := providerKindOf(provider)
+	if !ok {
+		return QuotaObservation{}, false
+	}
+	var obs QuotaObservation
+	var section SectionID
+	switch kind {
+	case ProviderClaude:
+		obs, ok = claudeHeadersObservation(headers, "", now)
+		section = SectionClaudeUsage
+	case ProviderCodex:
+		obs, ok = codexHeadersObservation(headers, "", now)
+		section = SectionCodexUsage
+	case ProviderXAI:
+		obs, ok = xaiBillingHeadersObservation(headers, now)
+		section = ""
+	default:
+		return QuotaObservation{}, false
+	}
+	if !ok {
+		return QuotaObservation{}, false
+	}
+	obs.Source = SourcePoll
+	if section != "" {
+		obs.Sections = map[SectionID]SectionStatus{section: SectionOK}
+		for i := range obs.Windows {
+			obs.Windows[i].Section = section
+			obs.Windows[i].Source = SourcePoll
+		}
+	}
+	return obs, true
+}
+
+// xaiBillingHeadersObservation reads the x-xai-billing-* form the P1 xAI poller
+// synthesizes from the Grok billing endpoints. The legacy .cds restore uses it too.
+func xaiBillingHeadersObservation(headers http.Header, now time.Time) (QuotaObservation, bool) {
+	used, hasUsed := parseQuotaFloat(quotaHeaderValue(headers, "X-Xai-Billing-Used-Percent"))
+	resetAt := parseQuotaResetAt(quotaHeaderValue(headers, "X-Xai-Billing-Reset-At"), "", now)
+	if !hasUsed && resetAt.IsZero() {
+		return QuotaObservation{}, false
+	}
+	id, section, period := WindowID("weekly"), SectionXAIWeekly, 7*24*time.Hour
+	if strings.EqualFold(quotaHeaderValue(headers, "X-Xai-Billing-Period-Type"), "monthly") {
+		id, section, period = "monthly", SectionXAIMonthly, 30*24*time.Hour
+	}
+	if minutes, ok := parseQuotaFloat(quotaHeaderValue(headers, "X-Xai-Billing-Window-Minutes")); ok && minutes > 0 {
+		period = time.Duration(minutes) * time.Minute
+	}
+	window := QuotaWindowObs{ID: id, ResetAt: resetAt, Period: period, Section: section, Source: SourcePoll, ObservedAt: now}
+	if hasUsed {
+		window.Used = KnownPercent(used)
+	}
+	return QuotaObservation{
+		Provider:   ProviderXAI,
+		Source:     SourcePoll,
+		ObservedAt: now,
+		Windows:    []QuotaWindowObs{window},
+		Sections:   map[SectionID]SectionStatus{section: SectionOK},
+		Extras:     XAIExtras{Access: XAIAccessGrokCLI},
+	}, true
+}
+
+// DevinStatusObservation builds the Devin observation from GetUserStatus
+// fields. The token refresh and the legacy .cds restore share it. P3 moves the
+// parser next to the Devin poller.
+func DevinStatusObservation(source Source, plan string, dailyRemaining, weeklyRemaining int64, dailyReset, weeklyReset, planStart, planEnd, now time.Time) QuotaObservation {
+	obs := QuotaObservation{
+		Provider:   ProviderDevin,
+		Source:     source,
+		ObservedAt: now,
+		Sections:   map[SectionID]SectionStatus{SectionDevinStatus: SectionOK},
+		Windows: []QuotaWindowObs{
+			{ID: "daily", Used: KnownPercent(float64(100 - dailyRemaining)), ResetAt: dailyReset, Period: 24 * time.Hour, Section: SectionDevinStatus, Source: source, ObservedAt: now},
+			{ID: "weekly", Used: KnownPercent(float64(100 - weeklyRemaining)), ResetAt: weeklyReset, Period: 7 * 24 * time.Hour, Section: SectionDevinStatus, Source: source, ObservedAt: now},
+		},
+	}
+	extras := DevinExtras{}
+	if strings.TrimSpace(plan) != "" {
+		extras.Plan = OKSection(DevinPlan{Name: plan, Start: Instant{planStart}, End: Instant{planEnd}}, now)
+	}
+	obs.Extras = extras
+	return obs
+}
+
+// devinLegacySignals converts the Devin keys the pre-snapshot refresh path
+// stored in quota.signals. Deleted with the legacy decoder after one release.
+func devinLegacySignals(signals map[string]string, observedAt time.Time) (QuotaObservation, bool) {
+	percent := func(key string) (int64, bool) {
+		value, ok := parseQuotaFloat(strings.TrimSuffix(strings.TrimSpace(signals[key]), "%"))
+		if !ok {
+			return 0, false
+		}
+		return int64(value), true
+	}
+	daily, okDaily := percent("daily_quota_remaining_percent")
+	weekly, okWeekly := percent("weekly_quota_remaining_percent")
+	if !okDaily && !okWeekly {
+		return QuotaObservation{}, false
+	}
+	instant := func(key string) time.Time {
+		return parseQuotaResetAt(strings.TrimSpace(signals[key]), "", observedAt)
+	}
+	obs := DevinStatusObservation(SourceRefresh, signals["plan"], daily, weekly,
+		instant("daily_quota_reset_at"), instant("weekly_quota_reset_at"), instant("plan_start"), instant("plan_end"), observedAt)
+	if !okDaily {
+		obs.Windows = obs.Windows[1:]
+	} else if !okWeekly {
+		obs.Windows = obs.Windows[:1]
+	}
+	return obs, true
 }

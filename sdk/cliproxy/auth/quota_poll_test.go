@@ -104,11 +104,20 @@ func TestManager_QuotaPollTargetsAndObservation(t *testing.T) {
 	before, _ := manager.GetByID("codex-a")
 	manager.pollQuotaOnce(ctx, targets[0])
 	after, _ := manager.GetByID("codex-a")
-	if got := after.Quota.Signals["X-Codex-Primary-Used-Percent"]; got != "40" {
-		t.Fatalf("polled signal = %q, want 40 (signals %#v)", got, after.Quota.Signals)
+	var primary *QuotaWindowObs
+	for i := range after.QuotaSnapshot.Windows {
+		if after.QuotaSnapshot.Windows[i].ID == "primary" {
+			primary = &after.QuotaSnapshot.Windows[i]
+		}
 	}
-	if after.Quota.ObservedAt.IsZero() {
-		t.Fatal("polled snapshot has no observation time")
+	if primary == nil {
+		t.Fatalf("polled snapshot has no primary window: %+v", after.QuotaSnapshot)
+	}
+	if used, known := primary.Used.Get(); !known || used != 40 || primary.Source != SourcePoll {
+		t.Fatalf("polled primary window = %+v", *primary)
+	}
+	if after.QuotaSnapshot.UpdatedAt.IsZero() || after.QuotaSnapshot.LastPoll == nil {
+		t.Fatalf("polled snapshot has no observation time or poll status: %+v", after.QuotaSnapshot)
 	}
 	if !after.Quota.Exceeded || after.Quota.Reason != "quota" || !after.Quota.NextRecoverAt.Equal(nextRecover) {
 		t.Fatalf("polling changed cooldown state: %#v", after.Quota)
@@ -316,10 +325,9 @@ func TestQuotaPollDoesNotClearXAICooldown(t *testing.T) {
 }
 
 func TestPollShowsQuotaCapacity(t *testing.T) {
-	observe := func(provider string, h http.Header) QuotaState {
-		var q QuotaState
-		q.ObserveResponseHeadersForProvider(provider, h, time.Now())
-		return q
+	observe := func(provider string, h http.Header) QuotaObservation {
+		obs, _ := fromHeadersAdapter(provider, h, time.Now())
+		return obs
 	}
 	codexWith := func(key, value string) http.Header {
 		h := codexPollHeaders("")
@@ -350,7 +358,7 @@ func TestPollShowsQuotaCapacity(t *testing.T) {
 		{"unknown provider", "gemini", codexPollHeaders(""), false},
 	}
 	for _, tc := range cases {
-		if got := pollShowsQuotaCapacity(tc.provider, observe(tc.provider, tc.headers)); got != tc.want {
+		if got := pollShowsQuotaCapacity(observe(tc.provider, tc.headers)); got != tc.want {
 			t.Errorf("%s: pollShowsQuotaCapacity = %t, want %t", tc.name, got, tc.want)
 		}
 	}

@@ -238,6 +238,9 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 				cooldownStateChanged = true
 			}
 		}
+		incoming := auth.QuotaSnapshot
+		auth.QuotaSnapshot = existing.QuotaSnapshot.Clone()
+		auth.QuotaSnapshot.merge(incoming)
 		if existing.Quota.Exceeded && existing.Quota.Reason == "credential_quota" && existing.Quota.NextRecoverAt.After(time.Now()) {
 			auth.Unavailable = existing.Unavailable
 			auth.NextRetryAfter = existing.NextRetryAfter

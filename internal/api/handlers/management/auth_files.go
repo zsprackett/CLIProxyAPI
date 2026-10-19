@@ -670,10 +670,7 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 	entry["success"] = auth.Success
 	entry["failed"] = auth.Failed
 	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
-	entry["quota"] = quotaObservationPayloadForProvider(auth.Provider, auth.Quota)
-	if modelQuotas := modelQuotaObservationPayload(auth.Provider, auth.ModelStates); len(modelQuotas) > 0 {
-		entry["model_quotas"] = modelQuotas
-	}
+	entry["quota_snapshot"] = quotaSnapshotPayload(auth)
 	var quotaSupportedMap map[string]struct{}
 	if len(quotaSupported) > 0 {
 		quotaSupportedMap = quotaSupported[0]
@@ -798,44 +795,14 @@ func authFileRequestRetryFromJSON(data []byte) (int, bool) {
 	return (&coreauth.Auth{Metadata: metadata}).RequestRetryOverride()
 }
 
-// quotaObservationPayload exposes only passive provider observations. Cooldown
-// fields are intentionally excluded so this management response cannot be
-// mistaken for scheduler state or influence scheduling behavior.
-func quotaObservationPayloadForProvider(provider string, quota coreauth.QuotaState) gin.H {
-	if !coreauth.ProviderSupportsQuotaObservation(provider) {
-		return quotaObservationPayload(coreauth.QuotaState{})
+// quotaSnapshotPayload serves the credential's typed quota snapshot. Cooldown
+// fields stay out of it, so this management response cannot be mistaken for
+// scheduler state. Providers without a registry row serve an empty snapshot.
+func quotaSnapshotPayload(auth *coreauth.Auth) coreauth.QuotaSnapshot {
+	if auth == nil || !coreauth.ProviderSupportsQuotaObservation(auth.Provider) {
+		return coreauth.QuotaSnapshot{}
 	}
-	return quotaObservationPayload(quota)
-}
-
-func quotaObservationPayload(quota coreauth.QuotaState) gin.H {
-	observed := gin.H{}
-	if !quota.ObservedAt.IsZero() {
-		observed["observed_at"] = quota.ObservedAt
-	}
-	signals := make(map[string]string, len(quota.Signals))
-	for key, value := range quota.Signals {
-		signals[key] = value
-	}
-	observed["signals"] = signals
-	return observed
-}
-
-func modelQuotaObservationPayload(provider string, states map[string]*coreauth.ModelState) gin.H {
-	if !coreauth.ProviderSupportsQuotaObservation(provider) {
-		return gin.H{}
-	}
-	observations := gin.H{}
-	for model, state := range states {
-		if state == nil {
-			continue
-		}
-		if state.Quota.ObservedAt.IsZero() && len(state.Quota.Signals) == 0 {
-			continue
-		}
-		observations[model] = quotaObservationPayloadForProvider(provider, state.Quota)
-	}
-	return observations
+	return auth.QuotaSnapshot.Clone()
 }
 
 func authWeightValue(auth *coreauth.Auth) (int64, bool) {

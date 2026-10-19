@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"testing"
 	"time"
@@ -9,16 +10,22 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
+func soonestResetSnapshot(provider, model string, observedAt time.Time, kv ...string) QuotaSnapshot {
+	h := make(http.Header, len(kv)/2)
+	for i := 0; i+1 < len(kv); i += 2 {
+		h.Set(kv[i], kv[i+1])
+	}
+	var snapshot QuotaSnapshot
+	snapshot.ObserveResponseHeaders(provider, model, h, observedAt)
+	return snapshot
+}
+
 func claudeAuthResettingAt(id string, resetAt time.Time) *Auth {
 	return &Auth{
 		ID:       id,
 		Provider: "claude",
-		Quota: QuotaState{
-			ObservedAt: resetAt.Add(-time.Hour),
-			Signals: map[string]string{
-				"Anthropic-Ratelimit-Unified-7d-Reset": strconv.FormatInt(resetAt.Unix(), 10),
-			},
-		},
+		QuotaSnapshot: soonestResetSnapshot("claude", "", resetAt.Add(-time.Hour),
+			"Anthropic-Ratelimit-Unified-7d-Reset", strconv.FormatInt(resetAt.Unix(), 10)),
 	}
 }
 
@@ -92,38 +99,38 @@ func TestWeeklyQuotaResetAt_Codex(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		signals map[string]string
+		signals []string
 		want    time.Time
 	}{
 		{
 			name:    "secondary reset-at",
-			signals: map[string]string{"X-Codex-Secondary-Reset-At": strconv.FormatInt(resetAt.Unix(), 10)},
+			signals: []string{"X-Codex-Secondary-Window-Minutes", "10080", "X-Codex-Secondary-Reset-At", strconv.FormatInt(resetAt.Unix(), 10)},
 			want:    resetAt,
 		},
 		{
 			name:    "secondary reset-after-seconds",
-			signals: map[string]string{"X-Codex-Secondary-Reset-After-Seconds": "3600"},
+			signals: []string{"X-Codex-Secondary-Window-Minutes", "10080", "X-Codex-Secondary-Reset-After-Seconds", "3600"},
 			want:    observed.Add(time.Hour),
 		},
 		{
 			name: "weekly primary window",
-			signals: map[string]string{
-				"X-Codex-Primary-Window-Minutes": "10080",
-				"X-Codex-Primary-Reset-At":       strconv.FormatInt(resetAt.Unix(), 10),
+			signals: []string{
+				"X-Codex-Primary-Window-Minutes", "10080",
+				"X-Codex-Primary-Reset-At", strconv.FormatInt(resetAt.Unix(), 10),
 			},
 			want: resetAt,
 		},
 		{
 			name: "short primary window ignored",
-			signals: map[string]string{
-				"X-Codex-Primary-Window-Minutes": "300",
-				"X-Codex-Primary-Reset-At":       strconv.FormatInt(resetAt.Unix(), 10),
+			signals: []string{
+				"X-Codex-Primary-Window-Minutes", "300",
+				"X-Codex-Primary-Reset-At", strconv.FormatInt(resetAt.Unix(), 10),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auth := &Auth{ID: "x", Provider: "codex", Quota: QuotaState{ObservedAt: observed, Signals: tt.signals}}
+			auth := &Auth{ID: "x", Provider: "codex", QuotaSnapshot: soonestResetSnapshot("codex", "", observed, tt.signals...)}
 			if got := weeklyQuotaResetAt(auth, "", now); !got.Equal(tt.want) {
 				t.Fatalf("weeklyQuotaResetAt() = %v, want %v", got, tt.want)
 			}
@@ -136,19 +143,14 @@ func TestSoonestResetSelectorPick_PrefersModelScopedWeeklyReset(t *testing.T) {
 
 	now := time.Now()
 	// "a" has the sooner credential-wide reset, but "b" has a sooner Fable window
-	// recorded on its model-scoped snapshot, which wins for that model.
+	// in its snapshot, which wins for that model.
 	a := claudeAuthResettingAt("a", now.Add(2*24*time.Hour))
-	b := claudeAuthResettingAt("b", now.Add(3*24*time.Hour))
-	b.ModelStates = map[string]*ModelState{
-		"claude-fable-5": {
-			Quota: QuotaState{
-				ObservedAt: now,
-				Signals: map[string]string{
-					"Anthropic-Ratelimit-Unified-7d_oi-Reset": strconv.FormatInt(now.Add(24*time.Hour).Unix(), 10),
-					"Anthropic-Ratelimit-Unified-7d-Reset":    strconv.FormatInt(now.Add(3*24*time.Hour).Unix(), 10),
-				},
-			},
-		},
+	b := &Auth{
+		ID:       "b",
+		Provider: "claude",
+		QuotaSnapshot: soonestResetSnapshot("claude", "claude-fable-5", now,
+			"Anthropic-Ratelimit-Unified-7d_oi-Reset", strconv.FormatInt(now.Add(24*time.Hour).Unix(), 10),
+			"Anthropic-Ratelimit-Unified-7d-Reset", strconv.FormatInt(now.Add(3*24*time.Hour).Unix(), 10)),
 	}
 	auths := []*Auth{a, b}
 
@@ -174,13 +176,9 @@ func TestWeeklyQuotaResetAt_IgnoresModelWindowOnCredentialSnapshot(t *testing.T)
 
 	now := time.Now()
 	shared := now.Add(3 * 24 * time.Hour).Truncate(time.Second)
-	auth := &Auth{ID: "x", Provider: "claude", Quota: QuotaState{
-		ObservedAt: now,
-		Signals: map[string]string{
-			"Anthropic-Ratelimit-Unified-7d_oi-Reset": strconv.FormatInt(now.Add(time.Hour).Unix(), 10),
-			"Anthropic-Ratelimit-Unified-7d-Reset":    strconv.FormatInt(shared.Unix(), 10),
-		},
-	}}
+	auth := &Auth{ID: "x", Provider: "claude", QuotaSnapshot: soonestResetSnapshot("claude", "", now,
+		"Anthropic-Ratelimit-Unified-7d_oi-Reset", strconv.FormatInt(now.Add(time.Hour).Unix(), 10),
+		"Anthropic-Ratelimit-Unified-7d-Reset", strconv.FormatInt(shared.Unix(), 10))}
 	if got := weeklyQuotaResetAt(auth, "claude-fable-5", now); !got.Equal(shared) {
 		t.Fatalf("weeklyQuotaResetAt() = %v, want shared 7d reset %v", got, shared)
 	}
@@ -268,10 +266,9 @@ func TestSchedulerPick_MixedProvidersSoonestReset(t *testing.T) {
 	codexSoon := &Auth{
 		ID:       "codex-a",
 		Provider: "codex",
-		Quota: QuotaState{
-			ObservedAt: now,
-			Signals:    map[string]string{"X-Codex-Secondary-Reset-At": strconv.FormatInt(now.Add(time.Hour).Unix(), 10)},
-		},
+		QuotaSnapshot: soonestResetSnapshot("codex", "", now,
+			"X-Codex-Secondary-Window-Minutes", "10080",
+			"X-Codex-Secondary-Reset-At", strconv.FormatInt(now.Add(time.Hour).Unix(), 10)),
 	}
 	scheduler := newSchedulerForTest(
 		&SoonestResetSelector{},

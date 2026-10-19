@@ -19,16 +19,15 @@ import (
 type authFilesCooldownResponse struct {
 	ObservedAt time.Time `json:"observed_at"`
 	Files      []struct {
-		ID             string                    `json:"id"`
-		AuthIndex      string                    `json:"auth_index"`
-		Name           string                    `json:"name"`
-		Status         string                    `json:"status"`
-		StatusMessage  string                    `json:"status_message"`
-		Unavailable    bool                      `json:"unavailable"`
-		NextRetryAfter time.Time                 `json:"next_retry_after"`
-		Cooldowns      json.RawMessage           `json:"cooldowns"`
-		Quota          map[string]any            `json:"quota"`
-		ModelQuotas    map[string]map[string]any `json:"model_quotas"`
+		ID             string          `json:"id"`
+		AuthIndex      string          `json:"auth_index"`
+		Name           string          `json:"name"`
+		Status         string          `json:"status"`
+		StatusMessage  string          `json:"status_message"`
+		Unavailable    bool            `json:"unavailable"`
+		NextRetryAfter time.Time       `json:"next_retry_after"`
+		Cooldowns      json.RawMessage `json:"cooldowns"`
+		QuotaSnapshot  map[string]any  `json:"quota_snapshot"`
 	} `json:"files"`
 }
 
@@ -59,13 +58,15 @@ func TestListAuthFilesCooldownsSnapshot(t *testing.T) {
 	cfg := &config.Config{AuthDir: t.TempDir()}
 	manager.SetConfig(cfg)
 	for _, id := range []string{"a", "b"} {
+		snapshot := coreauth.QuotaSnapshot{}
+		snapshot.ObserveResponseHeaders("codex", "", http.Header{"X-Codex-Primary-Used-Percent": []string{"90"}}, now)
 		registerAuthForLookupTest(t, manager, &coreauth.Auth{
-			ID: id, Index: "index-" + id, Provider: "codex", Status: coreauth.StatusError,
+			ID: id, Index: "index-" + id, Provider: "codex", Status: coreauth.StatusError, QuotaSnapshot: snapshot,
 			Unavailable: true, NextRetryAfter: next,
 			Attributes: map[string]string{"runtime_only": "true"},
-			Quota:      coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: next, ObservedAt: now, Signals: map[string]string{"x-codex-primary-used-percent": "90"}},
+			Quota:      coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: next},
 			ModelStates: map[string]*coreauth.ModelState{
-				"model-a": {Unavailable: true, NextRetryAfter: next, Quota: coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: next, BackoffLevel: 6, ObservedAt: now, Signals: map[string]string{"x-codex-primary-used-percent": "90"}}, LastError: &coreauth.Error{HTTPStatus: 429, Message: "private upstream body"}},
+				"model-a": {Unavailable: true, NextRetryAfter: next, Quota: coreauth.QuotaState{Exceeded: true, Reason: "quota", NextRecoverAt: next, BackoffLevel: 6}, LastError: &coreauth.Error{HTTPStatus: 429, Message: "private upstream body"}},
 				"expired": {Status: coreauth.StatusError, Unavailable: true, NextRetryAfter: now.Add(-time.Hour), Quota: coreauth.QuotaState{Exceeded: true, NextRecoverAt: now.Add(-time.Hour), BackoffLevel: 9}},
 			},
 		})
@@ -100,9 +101,13 @@ func TestListAuthFilesCooldownsSnapshot(t *testing.T) {
 			if views[0].RemainingSeconds != wantSeconds || !views[0].RetryAt.Equal(next) {
 				t.Fatalf("inconsistent time basis: %+v", views[0])
 			}
-			for _, quota := range []map[string]any{file.Quota, file.ModelQuotas["model-a"]} {
-				if len(quota) != 2 || quota["signals"] == nil || quota["observed_at"] == nil {
-					t.Fatalf("quota observation changed: %+v", quota)
+			windows, _ := file.QuotaSnapshot["windows"].([]any)
+			if file.QuotaSnapshot["provider"] != "codex" || len(windows) != 1 || file.QuotaSnapshot["updated_at"] == nil {
+				t.Fatalf("quota snapshot changed: %+v", file.QuotaSnapshot)
+			}
+			for _, leaked := range []string{"exceeded", "reason", "next_recover_at", "backoff_level"} {
+				if _, ok := file.QuotaSnapshot[leaked]; ok {
+					t.Fatalf("cooldown field %q leaked into the quota snapshot: %+v", leaked, file.QuotaSnapshot)
 				}
 			}
 			var fields []map[string]any
@@ -212,7 +217,6 @@ func TestListAuthFiles_ExpiredCooldownReconciledToActive(t *testing.T) {
 			Exceeded:      true,
 			Reason:        "credential_quota",
 			NextRecoverAt: expiredDeadline,
-			ObservedAt:    expiredDeadline,
 		},
 		Attributes: map[string]string{"runtime_only": "true"},
 	})

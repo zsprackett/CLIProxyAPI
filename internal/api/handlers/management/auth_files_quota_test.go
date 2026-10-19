@@ -1,68 +1,78 @@
 package management
 
 import (
+	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
-func TestModelQuotaObservationPayloadOmitsUnsupportedProviders(t *testing.T) {
-	states := map[string]*coreauth.ModelState{
-		"grok-4": {
-			Quota: coreauth.QuotaState{
-				ObservedAt: time.Unix(10, 0),
-				Signals:    map[string]string{"X-Ratelimit-Remaining-Requests": "1"},
-			},
-		},
+func observedCodexAuth(t *testing.T, provider string) *coreauth.Auth {
+	t.Helper()
+	auth := &coreauth.Auth{Provider: provider}
+	auth.QuotaSnapshot.ObserveResponseHeaders("codex", "", http.Header{
+		"X-Codex-Primary-Used-Percent":   []string{"51"},
+		"X-Codex-Primary-Window-Minutes": []string{"10080"},
+		"X-Codex-Plan-Type":              []string{"pro"},
+	}, time.Unix(10, 0))
+	if auth.QuotaSnapshot.IsZero() {
+		t.Fatal("test fixture produced an empty snapshot")
 	}
-	if got := modelQuotaObservationPayload("grok", states); len(got) != 0 {
-		t.Fatalf("unsupported provider returned model observations: %#v", got)
-	}
-	for _, provider := range []string{"gemini", "gemini-interactions", "openai", "openai-compatibility", "plugin-provider"} {
-		if got := modelQuotaObservationPayload(provider, states); len(got) != 0 {
-			t.Fatalf("provider %q returned model observations: %#v", provider, got)
+	return auth
+}
+
+func TestQuotaSnapshotPayloadOmitsUnsupportedProviders(t *testing.T) {
+	for _, provider := range []string{"grok", "gemini", "gemini-interactions", "openai", "openai-compatibility", "plugin-provider"} {
+		got := quotaSnapshotPayload(observedCodexAuth(t, provider))
+		if !got.IsZero() {
+			t.Fatalf("provider %q returned a snapshot: %#v", provider, got)
 		}
 	}
-}
-
-func TestModelQuotaObservationPayloadSkipsNilAndEmptyStates(t *testing.T) {
-	states := map[string]*coreauth.ModelState{
-		"nil":   nil,
-		"empty": &coreauth.ModelState{},
-		"observed": &coreauth.ModelState{Quota: coreauth.QuotaState{
-			ObservedAt: time.Unix(10, 0),
-			Signals:    map[string]string{"X-Codex-Plan-Type": "pro"},
-		}},
-	}
-	got := modelQuotaObservationPayload("codex", states)
-	if len(got) != 1 {
-		t.Fatalf("model observations = %#v, want only observed state", got)
-	}
-	if _, ok := got["observed"]; !ok {
-		t.Fatalf("observed model quota missing: %#v", got)
+	if got := quotaSnapshotPayload(nil); !got.IsZero() {
+		t.Fatalf("nil auth returned a snapshot: %#v", got)
 	}
 }
 
-func TestQuotaObservationPayloadExcludesCooldownState(t *testing.T) {
-	payload := quotaObservationPayload(coreauth.QuotaState{
+func TestQuotaSnapshotPayloadServesSupportedProviderWindows(t *testing.T) {
+	got := quotaSnapshotPayload(observedCodexAuth(t, "codex"))
+	if got.Provider != coreauth.ProviderCodex || len(got.Windows) != 1 || got.Windows[0].ID != "primary" {
+		t.Fatalf("snapshot = %#v, want the codex primary window", got)
+	}
+	if used, known := got.Windows[0].Used.Get(); !known || used != 51 {
+		t.Fatalf("primary used = %v (known %t), want 51", used, known)
+	}
+}
+
+func TestQuotaSnapshotPayloadExcludesCooldownState(t *testing.T) {
+	auth := observedCodexAuth(t, "codex")
+	auth.Quota = coreauth.QuotaState{
 		Exceeded:      true,
 		Reason:        "credential_quota",
 		NextRecoverAt: time.Unix(20, 0),
 		BackoffLevel:  3,
-		ObservedAt:    time.Unix(10, 0),
-		Signals:       map[string]string{"X-Codex-Plan-Type": "pro"},
-	})
-	if _, ok := payload["exceeded"]; ok {
-		t.Fatalf("cooldown exceeded leaked: %#v", payload)
 	}
-	if _, ok := payload["reason"]; ok {
-		t.Fatalf("cooldown reason leaked: %#v", payload)
+	raw, errMarshal := json.Marshal(quotaSnapshotPayload(auth))
+	if errMarshal != nil {
+		t.Fatal(errMarshal)
 	}
-	if _, ok := payload["next_recover_at"]; ok {
-		t.Fatalf("cooldown recovery leaked: %#v", payload)
+	var payload map[string]any
+	if errUnmarshal := json.Unmarshal(raw, &payload); errUnmarshal != nil {
+		t.Fatal(errUnmarshal)
 	}
-	if _, ok := payload["backoff_level"]; ok {
-		t.Fatalf("cooldown backoff leaked: %#v", payload)
+	for _, leaked := range []string{"exceeded", "reason", "next_recover_at", "backoff_level"} {
+		if _, ok := payload[leaked]; ok {
+			t.Fatalf("cooldown field %q leaked: %#v", leaked, payload)
+		}
+	}
+}
+
+func TestQuotaSnapshotPayloadIsACopy(t *testing.T) {
+	auth := observedCodexAuth(t, "codex")
+	got := quotaSnapshotPayload(auth)
+	got.Windows[0].LimitReached = true
+	if auth.QuotaSnapshot.Windows[0].LimitReached {
+		t.Fatal("mutating the payload changed the auth snapshot")
 	}
 }

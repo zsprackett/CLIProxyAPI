@@ -663,14 +663,25 @@ func TestDevinExecutor_Refresh(t *testing.T) {
 	if updated.Metadata["weekly_quota_remaining_percent"] != nil {
 		t.Errorf("expected weekly quota to not be in metadata, got %v", updated.Metadata["weekly_quota_remaining_percent"])
 	}
-	if updated.Quota.Signals["daily_quota_remaining_percent"] != "95%" {
-		t.Errorf("expected quota signal 95%%, got %q", updated.Quota.Signals["daily_quota_remaining_percent"])
+	windows := map[cliproxyauth.WindowID]cliproxyauth.QuotaWindowObs{}
+	for _, w := range updated.QuotaSnapshot.Windows {
+		windows[w.ID] = w
 	}
-	if updated.Quota.Signals["weekly_quota_remaining_percent"] != "45%" {
-		t.Errorf("expected quota signal 45%%, got %q", updated.Quota.Signals["weekly_quota_remaining_percent"])
+	if used, known := windows["daily"].Used.Get(); !known || used != 5 {
+		t.Errorf("expected daily used 5%%, got %v (known %t)", used, known)
 	}
-	if updated.Quota.ObservedAt.IsZero() {
-		t.Error("expected non-zero Quota.ObservedAt")
+	if used, known := windows["weekly"].Used.Get(); !known || used != 55 {
+		t.Errorf("expected weekly used 55%%, got %v (known %t)", used, known)
+	}
+	if windows["daily"].ResetAt.IsZero() || windows["weekly"].ResetAt.IsZero() {
+		t.Errorf("expected reset times on both windows, got daily %v weekly %v", windows["daily"].ResetAt, windows["weekly"].ResetAt)
+	}
+	extras, ok := updated.QuotaSnapshot.Extras.(cliproxyauth.DevinExtras)
+	if !ok || extras.Plan.Value == nil || extras.Plan.Value.Name != "Pro" {
+		t.Errorf("expected devin plan Pro in extras, got %+v", updated.QuotaSnapshot.Extras)
+	}
+	if updated.QuotaSnapshot.UpdatedAt.IsZero() {
+		t.Error("expected non-zero QuotaSnapshot.UpdatedAt")
 	}
 }
 
