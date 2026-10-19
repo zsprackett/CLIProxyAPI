@@ -1576,6 +1576,7 @@
     "ledger_loading": "Загрузка…",
     "ledger_no_reset": "Сброс не ожидается",
     "window_unknown": "Неизвестно",
+    "window_reset_awaiting": "Сброшен, ожидаются данные",
     "window_limit_reached": "Лимит исчерпан",
     "window_stale_since": "Данные устарели ({{age}})",
     "window_stale_hint": "Последний опрос этого лимита завершился ошибкой. Показан последний успешный процент.",

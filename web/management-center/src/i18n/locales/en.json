@@ -1573,6 +1573,7 @@
     "ledger_loading": "Loading…",
     "ledger_no_reset": "No reset pending",
     "window_unknown": "Unknown",
+    "window_reset_awaiting": "Reset, awaiting data",
     "window_limit_reached": "Limit reached",
     "window_stale_since": "Stale since {{age}}",
     "window_stale_hint": "The last poll for this limit failed. The percent is the last good reading.",

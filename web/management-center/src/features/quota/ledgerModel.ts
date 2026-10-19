@@ -38,6 +38,8 @@ export interface LedgerWindow {
    * with a known percent above 0 is not exhausted.
    */
   limitReached?: boolean;
+  /** The reset passed while the percent was unknown; no reading came after it. */
+  awaitingData?: boolean;
   /** When the data went stale because the sub-request that owns it failed. */
   staleSinceMs?: number | null;
 }
@@ -213,11 +215,18 @@ export function livePlanType(provider: QuotaProviderType, quota: unknown): strin
 /**
  * A window that already reset after it was observed has fresh capacity and no
  * pending reset — showing the stale utilization would claim a drained credential.
+ * Without a known percent there is nothing to settle, so it awaits new data.
  */
-const settleWindow = (window: LedgerWindow, nowMs: number): LedgerWindow =>
-  window.resetAtMs !== null && window.resetAtMs <= nowMs
+const settleWindow = (
+  window: LedgerWindow,
+  nowMs: number,
+  percentKnown = window.remaining !== null
+): LedgerWindow => {
+  if (window.resetAtMs === null || window.resetAtMs > nowMs) return window;
+  return percentKnown
     ? { ...window, remaining: 100, resetAtMs: null, limitReached: false }
-    : window;
+    : { ...window, remaining: null, resetAtMs: null, limitReached: false, awaitingData: true };
+};
 
 const parseIsoMs = (value: string | null | undefined): number | null => {
   if (!value) return null;
@@ -247,7 +256,8 @@ export function snapshotLedgerWindows(
         limitReached,
         staleSinceMs: windowStaleSinceMs(snapshot, window),
       },
-      nowMs
+      nowMs,
+      used !== null
     );
   });
 }

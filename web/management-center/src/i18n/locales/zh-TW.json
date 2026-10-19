@@ -1597,6 +1597,7 @@
     "ledger_loading": "載入中…",
     "ledger_no_reset": "無待重置",
     "window_unknown": "未知",
+    "window_reset_awaiting": "已重置，等待資料",
     "window_limit_reached": "已達上限",
     "window_stale_since": "資料已過期（{{age}}）",
     "window_stale_hint": "該限額最近一次查詢失敗，百分比為最後一次成功讀取的值。",

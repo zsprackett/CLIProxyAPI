@@ -60,7 +60,9 @@ export function LedgerWindowList({ windows, nowMs, classes }: LedgerWindowListPr
           <span className={cls.windowPercent}>
             {known
               ? `${Math.round(window.remaining as number)}%`
-              : t('quota_management.window_unknown')}
+              : window.awaitingData
+                ? t('quota_management.window_reset_awaiting')
+                : t('quota_management.window_unknown')}
           </span>
         </div>
         {known && (
