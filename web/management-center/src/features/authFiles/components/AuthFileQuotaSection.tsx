@@ -14,12 +14,12 @@ import { Button } from '@/components/ui/Button';
 import { IconRefreshCw } from '@/components/ui/icons';
 import { bindQuotaClasses } from '@/features/quota/types';
 import { WindowList } from '@/features/quota/snapshot/WindowList';
-import { readQuotaSnapshot } from '@/features/quota/snapshot/windows';
+import { newerQuotaReading, readQuotaSnapshot } from '@/features/quota/snapshot/windows';
 import { useNow } from '@/hooks/useNow';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '@/features/quota/providers';
 import styles from './AuthFileQuota.module.scss';
 
-/** 认证文件卡片外衣：紧凑额度样式绑定成类型化契约（缺键在模块初始化即抛）。 */
+/** Compact quota classes of the auth-file card; a missing class key throws at module load. */
 const compactQuotaClasses = bindQuotaClasses(styles, 'AuthFileQuota.module.scss');
 
 const assertNever = (value: never): never => {
@@ -162,6 +162,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
 
   const quotaStatus = quota?.status ?? 'idle';
   const snapshot = readQuotaSnapshot(quotaType, file.quota_snapshot);
+  const showSnapshot = newerQuotaReading(quota, snapshot) === 'snapshot';
   const canRefreshQuota = !disableControls && !file.disabled && !resettingQuota;
   const canUseResetQuota = canRefreshQuota && quotaStatus !== 'loading';
   const showResetQuotaAction = quota !== undefined && Boolean(adapter.canResetQuota?.(quota));
@@ -190,7 +191,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
 
   return (
     <div className={styles.quotaSection}>
-      {quotaStatus === 'idle' && snapshot && (
+      {showSnapshot && snapshot && (
         <WindowList
           provider={snapshot.provider}
           snapshot={snapshot}
@@ -215,7 +216,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
             message: quotaErrorMessage,
           })}
         </div>
-      ) : quota ? (
+      ) : showSnapshot ? null : quota ? (
         <adapter.Body quota={quota} classes={compactQuotaClasses} />
       ) : (
         <div className={styles.quotaMessage}>{t(`${adapter.i18nPrefix}.idle`)}</div>

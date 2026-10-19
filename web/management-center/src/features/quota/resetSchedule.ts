@@ -22,7 +22,7 @@ import { parseIsoToMs } from '@/utils/quota';
 import { HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 import type { QuotaSnapshot } from './snapshot/types';
-import { isCapacityWindow } from './snapshot/windows';
+import { isCapacityWindow, newerQuotaReading } from './snapshot/windows';
 
 export interface QuotaRowInstant {
   /** Matches the React key of the row it belongs to. */
@@ -84,15 +84,17 @@ const collectRows = (rows: readonly WindowLike[], fallbackPrefix: string): Quota
  * turning over is not a rate limit lifting, and ranking cards by it would
  * answer a different question than the one being asked. Both still render
  * their own countdown.
+ *
+ * The instants come from the newer whole reading: the live state or the snapshot.
  */
 export function collectQuotaRowInstants(
   provider: QuotaProviderType,
   quota: unknown,
   snapshot?: QuotaSnapshot | null
 ): QuotaRowInstant[] {
-  const state = quota as { status?: string } | undefined;
-  if (!state || state.status !== 'success') {
-    if (!snapshot || snapshot.provider !== provider) return [];
+  const reading = newerQuotaReading(quota, snapshot?.provider === provider ? snapshot : null);
+  if (reading === 'none') return [];
+  if (reading === 'snapshot' && snapshot) {
     return snapshot.windows
       .filter(isCapacityWindow)
       .map((window): QuotaRowInstant | null => {

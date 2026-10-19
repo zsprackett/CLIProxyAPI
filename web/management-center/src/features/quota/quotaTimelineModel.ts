@@ -13,7 +13,7 @@
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 import type { QuotaSnapshot } from './snapshot/types';
-import { isCapacityWindow, quotaWindowLabel } from './snapshot/windows';
+import { isCapacityWindow, newerQuotaReading, quotaWindowLabel } from './snapshot/windows';
 
 export { DAY_MS, HOUR_MS };
 
@@ -325,7 +325,7 @@ export interface TimelineLaneInput {
   displayName: string;
   provider: QuotaProviderType;
   quota: { status?: string } | undefined;
-  /** The backend quota snapshot; drawn when no live reading is loaded. */
+  /** The backend quota snapshot; drawn when it is the newer reading. */
   snapshot?: QuotaSnapshot | null;
   /**
    * Longest window period worth drawing, in hours — normally the visible span.
@@ -337,7 +337,7 @@ export interface TimelineLaneInput {
 
 const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
-/** A lane from the backend snapshot, for a credential with no live reading. */
+/** A lane from the backend snapshot, when it is the newer reading. */
 function snapshotLane(
   empty: TimelineLane,
   snapshot: QuotaSnapshot,
@@ -428,9 +428,9 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     resetCredits: [],
   };
 
-  if (!quota || quota.status !== 'success') {
-    return snapshot ? snapshotLane(empty, snapshot, maxPeriodHours) : empty;
-  }
+  const reading = newerQuotaReading(quota, snapshot?.provider === provider ? snapshot : null);
+  if (reading === 'snapshot' && snapshot) return snapshotLane(empty, snapshot, maxPeriodHours);
+  if (reading !== 'live' || !quota) return empty;
 
   if (provider === 'claude' || provider === 'codex') {
     const windows = ((quota as { windows?: WindowLike[] }).windows ?? []).filter(
