@@ -1,6 +1,7 @@
 package requestlog
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -28,11 +29,11 @@ func TestTrackerLanesPerModel(t *testing.T) {
 	if tr.hashes != 2*p.Size() {
 		t.Fatalf("hashes = %d, want %d", tr.hashes, 2*p.Size())
 	}
-	for i, model := range []string{"m3", "m4", "m5"} {
-		tr.observe(obsAt(t0.Add(time.Second*time.Duration(6+i)), "s", model, "a", 100, 0, 0, p))
+	for i := range maxLanes - 1 {
+		tr.observe(obsAt(t0.Add(time.Second*time.Duration(6+i)), "s", fmt.Sprintf("m%d", i), "a", 100, 0, 0, p))
 	}
 	if len(sess.lanes) != maxLanes || sess.lanes[maxLanes-1].model != "opus" {
-		t.Fatalf("fifth model must drop the least recently touched lane (haiku), got %+v", sess.lanes)
+		t.Fatalf("a lane past maxLanes must drop the least recently touched lane (haiku), got %+v", sess.lanes)
 	}
 	if tr.hashes != maxLanes*p.Size() {
 		t.Fatalf("hashes after lane drop = %d", tr.hashes)
@@ -131,6 +132,11 @@ func TestTrackerInterleavedClassifierTranscripts(t *testing.T) {
 	b = append(b, "sub: found it")
 	if v := tr.observe(obsAt(at(6), "s", "sonnet", "x", 10, 60000, 200, classifierPrintOf(b, "Grep: TODO"))); v.Kind != VerdictHit {
 		t.Fatalf("agent B's second call read its whole cached prefix and must be a hit, got %+v", v)
+	}
+	// B's first call shared only the preamble with A, so it forked a lane; each
+	// later call rewrote only its tail, so it replaced its own lane.
+	if lanes := tr.sessions["s"].lanes; len(lanes) != 2 {
+		t.Fatalf("two agents must hold exactly two lanes, got %d", len(lanes))
 	}
 }
 

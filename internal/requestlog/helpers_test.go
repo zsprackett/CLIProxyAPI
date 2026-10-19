@@ -153,3 +153,8 @@ func classifierPrintOf(transcript []string, action string) *prompt.Print {
 	b.WriteString(`,{"type":"text","text":"</transcript>"},{"type":"text","text":"` + action + `"}]}]}`)
 	return prompt.Of([]byte(b.String()), prompt.FormatClaudeMessages)
 }
+
+// judgeIn judges obs against the lane the tracker would choose in sess.
+func judgeIn(obs observation, sess *session) (Verdict, *laneUpdate) {
+	return judge(obs, sess, sess.baseline(obs.model, obs.print))
+}

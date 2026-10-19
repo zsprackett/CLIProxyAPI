@@ -1,7 +1,9 @@
 package requestlog
 
 import (
+	"cmp"
 	"container/list"
+	"slices"
 	"sync"
 	"time"
 
@@ -26,19 +28,23 @@ type tracker struct {
 	hashBudget  int // fixed 1<<20 hashes = 8 MiB of segment hashes
 }
 
-// session holds up to maxLanes baselines, one per model. Lanes exist because
-// Claude Code interleaves Haiku helper calls with the main model in ONE session:
-// a single "previous request" baseline would report every alternation as
-// "model changed" while the main model's cache stays warm.
+// session holds up to maxLanes baselines. Lanes exist because one session ID
+// carries several conversations at once: Claude Code interleaves helper models
+// with the main model, and its auto-mode classifier checks every agent's
+// transcript under the parent session ID on one model. A single "previous
+// request" baseline would judge each conversation against another one.
+// A model can hold several lanes, one per conversation (see baseline).
 type session struct {
 	id    string
 	elem  *list.Element
 	lanes []lane // len <= maxLanes, most recently touched first
 }
 
-const maxLanes = 4
+// maxLanes bounds the conversations tracked per session: the main model, its
+// helper models, and one classifier transcript per active agent.
+const maxLanes = 16
 
-// lane is the baseline for one (session, model): the last successful attempt.
+// lane is the baseline for one conversation: its last successful attempt.
 type lane struct {
 	model        string // interned
 	authID       string // interned
@@ -56,6 +62,9 @@ type laneUpdate struct {
 	cachedPrefix int64
 	ttl          time.Duration
 	print        *prompt.Print
+	// fork keeps the judged baseline and adds this attempt as a new lane, because
+	// the attempt starts another conversation instead of continuing that one.
+	fork bool
 }
 
 func newTracker(maxSessions int) *tracker {
@@ -75,14 +84,19 @@ func (t *tracker) observe(obs observation) Verdict {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	sess := t.sessions[obs.sessionID]
-	v, upd := judge(obs, sess)
+	base := sess.baseline(obs.model, obs.print)
+	v, upd := judge(obs, sess, base)
 	if upd == nil || obs.sessionID == "" {
 		return v
 	}
 	if sess == nil {
 		sess = t.addLocked(obs.sessionID)
 	}
-	t.setLaneLocked(sess, lane(*upd))
+	if upd.fork {
+		base = nil
+	}
+	t.setLaneLocked(sess, base, lane{model: upd.model, authID: upd.authID, touchedAt: upd.touchedAt,
+		cachedPrefix: upd.cachedPrefix, ttl: upd.ttl, print: upd.print})
 	t.lru.MoveToFront(sess.elem)
 	t.evictLocked()
 	return v
@@ -95,11 +109,12 @@ func (t *tracker) addLocked(id string) *session {
 	return sess
 }
 
-// setLaneLocked replaces or inserts the lane for l.model at the front, dropping
-// the least recently touched lane when the session already holds maxLanes.
-func (t *tracker) setLaneLocked(sess *session, l lane) {
+// setLaneLocked removes the replaced lane (nil inserts only), then puts l at the
+// front, dropping the least recently touched lane when the session already holds
+// maxLanes. replaced must point into sess.lanes.
+func (t *tracker) setLaneLocked(sess *session, replaced *lane, l lane) {
 	for i := range sess.lanes {
-		if sess.lanes[i].model == l.model {
+		if &sess.lanes[i] == replaced {
 			t.hashes -= sess.lanes[i].print.Size()
 			sess.lanes = append(sess.lanes[:i], sess.lanes[i+1:]...)
 			break
@@ -113,18 +128,26 @@ func (t *tracker) setLaneLocked(sess *session, l lane) {
 	sess.lanes = append([]lane{l}, sess.lanes...)
 }
 
-// baseline returns the lane for model, or nil. Prompt caches are per model, so
+// baseline returns the lane of model whose print shares the longest prefix with
+// p, the most recently touched on a tie, or nil. Prompt caches are per model, so
 // another model's lane is never a baseline. A nil *session returns nil.
-func (s *session) baseline(model string) *lane {
+func (s *session) baseline(model string, p *prompt.Print) *lane {
 	if s == nil {
 		return nil
 	}
+	var best *lane
+	bestShared := -1
 	for i := range s.lanes {
-		if s.lanes[i].model == model {
-			return &s.lanes[i]
+		l := &s.lanes[i]
+		if l.model != model {
+			continue
+		}
+		shared := p.SharedPrefix(l.print)
+		if shared > bestShared || (shared == bestShared && l.touchedAt.After(best.touchedAt)) {
+			best, bestShared = l, shared
 		}
 	}
-	return nil
+	return best
 }
 
 // evictLocked drops least-recently-observed sessions while
@@ -195,11 +218,15 @@ func (t *tracker) export(now time.Time) []persistedLane {
 	return out
 }
 
-// restore loads persisted lanes, skipping malformed prints and lanes older than
-// maxBaselineAge. Called once per snapshot path, before the worker delivers records.
+// restore loads persisted lanes, skipping malformed prints (including prints in
+// an older encoding) and lanes older than maxBaselineAge. Lanes are inserted
+// oldest first so each session keeps its most recently touched first order.
+// Called once per snapshot path, before the worker delivers records.
 func (t *tracker) restore(lanes []persistedLane, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	lanes = slices.Clone(lanes)
+	slices.SortStableFunc(lanes, func(a, b persistedLane) int { return cmp.Compare(a.TouchedAt, b.TouchedAt) })
 	for _, pl := range lanes {
 		touched := time.UnixMilli(pl.TouchedAt)
 		if pl.Session == "" || now.Sub(touched) > maxBaselineAge {
@@ -213,7 +240,7 @@ func (t *tracker) restore(lanes []persistedLane, now time.Time) {
 		if sess == nil {
 			sess = t.addLocked(pl.Session)
 		}
-		t.setLaneLocked(sess, lane{
+		t.setLaneLocked(sess, nil, lane{
 			model:        pl.Model,
 			authID:       pl.AuthID,
 			touchedAt:    touched,
