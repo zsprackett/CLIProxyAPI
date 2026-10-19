@@ -92,6 +92,15 @@ func TestQuotaWindowsForAuthCodex(t *testing.T) {
 			"X-Codex-Primary-Used-Percent", "5", "X-Codex-Primary-Window-Minutes", "43200",
 		}, map[string]float64{"codex:monthly": 5}},
 		{"missing window length", []string{"X-Codex-Primary-Used-Percent", "5"}, map[string]float64{}},
+		{"known percent wins over the namespace limit_reached flag", []string{
+			"X-Codex-Primary-Used-Percent", "100", "X-Codex-Primary-Window-Minutes", "300",
+			"X-Codex-Secondary-Used-Percent", "30", "X-Codex-Secondary-Window-Minutes", "10080",
+			"X-Codex-Limit-Reached", "true",
+		}, map[string]float64{"codex:5h": 100, "codex:weekly": 30}},
+		{"limit_reached fills an unknown percent", []string{
+			"X-Codex-Primary-Window-Minutes", "300", "X-Codex-Primary-Reset-After-Seconds", "600",
+			"X-Codex-Limit-Reached", "true",
+		}, map[string]float64{"codex:5h": 100}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
