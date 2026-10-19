@@ -126,6 +126,17 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 	auths := h.authManager.List()
 	observedAt := time.Now().UTC()
 	cooldownsKnown := !h.authManager.HomeEnabled()
+	// The quota snapshot is a v8 contract; the deprecated v0 listing keeps its shape.
+	serveQuotaSnapshot := c.GetBool(ConfigV8ContextKey)
+	decorate := func(entry gin.H, auth *coreauth.Auth) {
+		entry["cooldowns"] = nil
+		if cooldownsKnown {
+			entry["cooldowns"] = coreauth.CooldownSnapshotForAuth(auth, observedAt)
+		}
+		if serveQuotaSnapshot {
+			entry["quota_snapshot"] = quotaSnapshotPayload(auth)
+		}
+	}
 	if pagination.enabled {
 		matching := make([]*coreauth.Auth, 0, len(auths))
 		for _, auth := range auths {
@@ -142,10 +153,7 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 		files := make([]gin.H, 0, end-start)
 		for _, auth := range matching[start:end] {
 			if entry := h.buildAuthFileEntry(auth, quotaSupportedProviders); entry != nil {
-				entry["cooldowns"] = nil
-				if cooldownsKnown {
-					entry["cooldowns"] = coreauth.CooldownSnapshotForAuth(auth, observedAt)
-				}
+				decorate(entry, auth)
 				files = append(files, entry)
 			}
 		}
@@ -158,10 +166,7 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 			continue
 		}
 		if entry := h.buildAuthFileEntry(auth, quotaSupportedProviders); entry != nil {
-			entry["cooldowns"] = nil
-			if cooldownsKnown {
-				entry["cooldowns"] = coreauth.CooldownSnapshotForAuth(auth, observedAt)
-			}
+			decorate(entry, auth)
 			files = append(files, entry)
 		}
 	}
@@ -670,7 +675,6 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 	entry["success"] = auth.Success
 	entry["failed"] = auth.Failed
 	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
-	entry["quota_snapshot"] = quotaSnapshotPayload(auth)
 	var quotaSupportedMap map[string]struct{}
 	if len(quotaSupported) > 0 {
 		quotaSupportedMap = quotaSupported[0]

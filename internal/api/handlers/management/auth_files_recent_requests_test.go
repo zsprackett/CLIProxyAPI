@@ -42,8 +42,9 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, "/v0/management/auth-files", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v8/management/credentials", nil)
 	ginCtx.Request = req
+	ginCtx.Set(ConfigV8ContextKey, true)
 
 	h.ListAuthFiles(ginCtx)
 
