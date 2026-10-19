@@ -3,6 +3,8 @@ package requestlog
 import (
 	"testing"
 	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
 )
 
 func TestTrackerLanesPerModel(t *testing.T) {
@@ -106,5 +108,43 @@ func TestTrackerExportRestore(t *testing.T) {
 	}
 	if v := back.observe(obsAt(t0.Add(2*time.Minute), "fresh", "opus", "x", 10, 5000, 0, p)); v.Kind != VerdictHit {
 		t.Fatalf("restored baseline must judge a hit, got %+v", v)
+	}
+}
+
+// The auto-mode classifier runs for every agent under the parent session ID and
+// one model, with each agent's transcript inside a single message. Interleaved
+// calls for two agents must each be judged against their own agent's previous
+// call, not against whichever agent ran last.
+func TestTrackerInterleavedClassifierTranscripts(t *testing.T) {
+	tr := newTracker(10)
+	a := []string{"main: fix the bug", "main: ran tests"}
+	b := []string{"sub: explore the repo", "sub: read files", "sub: grep"}
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+
+	tr.observe(obsAt(at(0), "s", "sonnet", "x", 10, 0, 30000, classifierPrintOf(a, "Bash: go test")))
+	tr.observe(obsAt(at(2), "s", "sonnet", "x", 10, 2000, 58000, classifierPrintOf(b, "Read: main.go")))
+
+	a = append(a, "main: tests pass")
+	if v := tr.observe(obsAt(at(4), "s", "sonnet", "x", 10, 30000, 200, classifierPrintOf(a, "Bash: git commit"))); v.Kind != VerdictHit {
+		t.Fatalf("agent A's second call read its whole cached prefix and must be a hit, got %+v", v)
+	}
+	b = append(b, "sub: found it")
+	if v := tr.observe(obsAt(at(6), "s", "sonnet", "x", 10, 60000, 200, classifierPrintOf(b, "Grep: TODO"))); v.Kind != VerdictHit {
+		t.Fatalf("agent B's second call read its whole cached prefix and must be a hit, got %+v", v)
+	}
+}
+
+// A real edit inside one conversation must still be reported as a partial with
+// the edited message, after the lane logic learns to keep several lanes.
+func TestTrackerRealEditStillReportsMessageChanged(t *testing.T) {
+	tr := newTracker(10)
+	msgs := messagesN(20)
+	tr.observe(obsAt(t0, "s", "opus", "x", 10, 0, 80000, claudePrintOf(claudeOpts{messages: msgs})))
+	edited := append([]string(nil), msgs...)
+	edited[14] = "rewritten"
+	edited = append(edited, "m20")
+	v := tr.observe(obsAt(t0.Add(time.Minute), "s", "opus", "x", 10, 50000, 31000, claudePrintOf(claudeOpts{messages: edited})))
+	if v.Kind != VerdictPartial || v.Primary != CauseMessage || v.Segment.unpack() != (prompt.SegmentRef{Kind: prompt.SegmentMessage, Index: 14}) {
+		t.Fatalf("edit at message 14 = %+v (segment %+v)", v, v.Segment.unpack())
 	}
 }
