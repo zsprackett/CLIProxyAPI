@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -215,9 +216,20 @@ func (s *Section[T]) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// latest is the time of the newest fact the section holds: its value or its
+// last check.
+func (s Section[T]) latest() time.Time {
+	if s.CheckedAt.After(s.ValueAt) {
+		return s.CheckedAt
+	}
+	return s.ValueAt
+}
+
 // mergeSection keeps the last good value across a failure and ignores an
 // absent section, so a partial observation never erases what another
-// sub-request learned.
+// sub-request learned. Observations apply in ObservedAt order, not arrival
+// order, so a failure or a not_applicable older than the stored section is
+// ignored.
 func mergeSection[T any](prev, next Section[T]) Section[T] {
 	switch next.status() {
 	case SectionOK:
@@ -226,12 +238,18 @@ func mergeSection[T any](prev, next Section[T]) Section[T] {
 		}
 		return next
 	case SectionFailed:
+		if next.CheckedAt.Before(prev.latest()) {
+			return prev
+		}
 		out := prev
 		out.Status = SectionFailed
 		out.Error = next.Error
 		out.CheckedAt = next.CheckedAt
 		return out
 	case SectionNotApplicable:
+		if next.CheckedAt.Before(prev.latest()) {
+			return prev
+		}
 		return Section[T]{Status: SectionNotApplicable, CheckedAt: next.CheckedAt}
 	default:
 		return prev
@@ -551,19 +569,39 @@ func (w QuotaWindowObs) equal(o QuotaWindowObs) bool {
 		w.Section == o.Section && w.Source == o.Source && w.ObservedAt.Equal(o.ObservedAt)
 }
 
+// headerWindowRetention bounds how long a header-sourced window with an unknown
+// period outlives its reset. Only a poll retires its own section's windows, so
+// header windows need their own expiry or upstream-named Codex limits would
+// accumulate without bound.
+const headerWindowRetention = 8 * 24 * time.Hour
+
+// expiredHeaderWindow reports whether a headers-section window reset more than
+// one period (or the retention, when the period is unknown) before now.
+func expiredHeaderWindow(w QuotaWindowObs, now time.Time) bool {
+	if w.Section != SectionHeaders || w.ResetAt.IsZero() || now.IsZero() {
+		return false
+	}
+	limit := w.Period
+	if limit <= 0 {
+		limit = headerWindowRetention
+	}
+	return now.Sub(w.ResetAt) > limit
+}
+
 // apply merges obs into the snapshot. Per window the newer ObservedAt wins and a
 // poll beats headers on a tie. A section the observation reports as ok is
-// authoritative: its stored windows that the observation did not return are
-// dropped. A section reported as failed keeps its windows. A provider change
-// resets the snapshot first.
+// authoritative: its stored windows that the observation did not return and
+// that are not newer than the observation are dropped. A section reported as
+// failed keeps its windows. Long-expired header windows are dropped. A provider
+// change resets the snapshot first.
 func (s *QuotaSnapshot) apply(obs QuotaObservation) bool {
 	if s == nil || obs.Provider == "" {
 		return false
 	}
 	changed := false
 	if s.Provider != obs.Provider {
-		changed = !s.IsZero()
 		*s = QuotaSnapshot{Provider: obs.Provider}
+		changed = true
 	}
 	byKey := make(map[quotaWindowKey]QuotaWindowObs, len(s.Windows)+len(obs.Windows))
 	for _, w := range s.Windows {
@@ -578,13 +616,19 @@ func (s *QuotaSnapshot) apply(obs QuotaObservation) bool {
 			continue
 		}
 		for k, w := range byKey {
-			if w.Section != section {
+			if w.Section != section || w.ObservedAt.After(obs.ObservedAt) {
 				continue
 			}
 			if _, ok := observed[k]; !ok {
 				delete(byKey, k)
 				changed = true
 			}
+		}
+	}
+	for k, w := range byKey {
+		if expiredHeaderWindow(w, obs.ObservedAt) {
+			delete(byKey, k)
+			changed = true
 		}
 	}
 	for _, w := range obs.Windows {
@@ -606,12 +650,17 @@ func (s *QuotaSnapshot) apply(obs QuotaObservation) bool {
 				continue
 			}
 		}
+		if expiredHeaderWindow(w, obs.ObservedAt) {
+			continue
+		}
 		byKey[k] = w
 		changed = true
 	}
 	if obs.Extras != nil && obs.Extras.Kind() == s.Provider {
-		s.Extras = obs.Extras.mergeFrom(s.Extras)
-		changed = true
+		if merged := obs.Extras.mergeFrom(s.Extras); !reflect.DeepEqual(s.Extras, merged) {
+			s.Extras = merged
+			changed = true
+		}
 	}
 	if obs.Poll != nil {
 		poll := *obs.Poll

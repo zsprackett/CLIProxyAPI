@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -236,12 +237,13 @@ func TestManagerMarkResultRecordsResponseQuotaSnapshotInMemory(t *testing.T) {
 		t.Fatalf("Register() auth=%#v err=%v", auth, errRegister)
 	}
 
+	resetAt := time.Now().Add(time.Hour).Unix()
 	ctx := internallogging.WithResponseHeadersHolder(context.Background())
 	internallogging.SetResponseHeaders(ctx, http.Header{
 		"X-Codex-Active-Limit":           []string{"codex_bengalfox"},
 		"X-Codex-Primary-Used-Percent":   []string{"2"},
 		"X-Codex-Primary-Window-Minutes": []string{"10080"},
-		"X-Codex-Primary-Reset-At":       []string{"1782951970"},
+		"X-Codex-Primary-Reset-At":       []string{strconv.FormatInt(resetAt, 10)},
 	})
 	manager.MarkResult(ctx, Result{
 		AuthID:   auth.ID,
@@ -259,7 +261,7 @@ func TestManagerMarkResultRecordsResponseQuotaSnapshotInMemory(t *testing.T) {
 	}
 	primary := headersTestWindow(t, updated.QuotaSnapshot, "primary")
 	headersTestAssertUsed(t, primary, 2)
-	if primary.Class(ProviderCodex) != "codex:weekly" || primary.ResetAt.Unix() != 1782951970 || primary.Source != SourceHeaders {
+	if primary.Class(ProviderCodex) != "codex:weekly" || primary.ResetAt.Unix() != resetAt || primary.Source != SourceHeaders {
 		t.Fatalf("primary = %+v", primary)
 	}
 }
