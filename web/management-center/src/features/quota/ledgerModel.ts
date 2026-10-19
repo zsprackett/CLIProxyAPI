@@ -10,16 +10,21 @@
  *   headers. The backend already merged its windows. It costs no upstream
  *   request here, so rows have data before anyone clicks refresh.
  *
- * Live data wins while it is the newer reading. When the backend records a
- * snapshot after the live fetch, the snapshot's windows replace the matching
- * live ones and the live-only windows are kept.
+ * A row shows one whole reading, never a merge: `newerQuotaReading` picks the
+ * live state or the snapshot.
  */
 
 import type { AuthFileItem } from '@/types';
 import { DAY_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 import type { QuotaProviderKind, QuotaSnapshot, QuotaWindow } from './snapshot/types';
-import { quotaWindowLabel, readQuotaSnapshot, windowStaleSinceMs } from './snapshot/windows';
+import {
+  newerQuotaReading,
+  type KnownQuotaSnapshot,
+  quotaWindowLabel,
+  readQuotaSnapshot,
+  windowStaleSinceMs,
+} from './snapshot/windows';
 
 export interface LedgerWindow {
   id: string;
@@ -270,14 +275,7 @@ const snapshotPlanType = (snapshot: QuotaSnapshot): string | null => {
   return extras.kind === 'codex' ? plan.toLowerCase() : plan;
 };
 
-/** Quota the backend recorded for a credential (`quota_snapshot`), or null when it has none. */
-export function observedLedgerData(
-  provider: QuotaProviderType,
-  file: AuthFileItem,
-  nowMs: number
-): LedgerRowData | null {
-  const snapshot = readQuotaSnapshot(provider, file.quota_snapshot);
-  if (!snapshot) return null;
+const snapshotRow = (snapshot: KnownQuotaSnapshot, nowMs: number): LedgerRowData => {
   let observedAtMs: number | null = null;
   for (const window of snapshot.windows) {
     const at = parseIsoMs(window.observed_at);
@@ -289,76 +287,39 @@ export function observedLedgerData(
     planType: snapshotPlanType(snapshot),
     observedAtMs: observedAtMs ?? parseIsoMs(snapshot.updated_at),
   };
+};
+
+/** Quota the backend recorded for a credential (`quota_snapshot`), or null when it has none. */
+export function observedLedgerData(
+  provider: QuotaProviderType,
+  file: AuthFileItem,
+  nowMs: number
+): LedgerRowData | null {
+  const snapshot = readQuotaSnapshot(provider, file.quota_snapshot);
+  return snapshot ? snapshotRow(snapshot, nowMs) : null;
 }
 
-/**
- * Live windows use their own ids (`seven-day`, `five-hour`) while snapshot
- * windows use the backend's (`seven_day`, `primary`), so a shared label also
- * identifies the same window.
- */
-const sameWindow = (a: LedgerWindow, b: LedgerWindow): boolean =>
-  a.id === b.id ||
-  (a.labelKey !== undefined &&
-    a.labelKey === b.labelKey &&
-    a.labelParams?.name === b.labelParams?.name);
-
-/**
- * Overlays a newer observed snapshot on an older live reading: observed windows
- * replace the matching live windows in place, live-only windows are kept, and
- * observed-only windows are appended.
- */
-function overlayObserved(live: LedgerRowData, observed: LedgerRowData): LedgerRowData {
-  const pending = [...observed.windows];
-  const windows = live.windows.map((window) => {
-    const index = pending.findIndex((candidate) => sameWindow(window, candidate));
-    if (index < 0) return window;
-    return pending.splice(index, 1)[0];
-  });
-  return {
-    source: 'observed',
-    windows: [...windows, ...pending],
-    planType: live.planType ?? observed.planType,
-    observedAtMs: observed.observedAtMs,
-  };
-}
-
-/**
- * The newer of the live reading and the observed snapshot (see the module
- * comment), whichever exists, otherwise nothing.
- */
+/** The newer whole reading of the live state and the observed snapshot, otherwise nothing. */
 export function resolveLedgerRow(
   provider: QuotaProviderType,
   file: AuthFileItem,
   quota: unknown,
   nowMs: number
 ): LedgerRowData {
-  const observed = observedLedgerData(provider, file, nowMs);
-  const live = liveLedgerWindows(provider, quota);
-  if (live !== null) {
-    const liveRow: LedgerRowData = {
+  const snapshot = readQuotaSnapshot(provider, file.quota_snapshot);
+  const reading = newerQuotaReading(quota, snapshot);
+  if (reading === 'snapshot' && snapshot) return snapshotRow(snapshot, nowMs);
+  if (reading === 'live') {
+    return {
       source: 'live',
-      windows: live.map((window) => settleWindow(window, nowMs)),
+      windows: (liveLedgerWindows(provider, quota) ?? []).map((window) =>
+        settleWindow(window, nowMs)
+      ),
       planType: livePlanType(provider, quota),
       observedAtMs: null,
     };
-    const fetchedAtMs = toRecord(quota)?.fetchedAtMs;
-    if (
-      observed?.observedAtMs != null &&
-      isFiniteNumber(fetchedAtMs) &&
-      observed.observedAtMs > fetchedAtMs
-    ) {
-      return overlayObserved(liveRow, observed);
-    }
-    return liveRow;
   }
-  return (
-    observed ?? {
-      source: 'none',
-      windows: [],
-      planType: null,
-      observedAtMs: null,
-    }
-  );
+  return { source: 'none', windows: [], planType: null, observedAtMs: null };
 }
 
 /* ------------------------------------------------------------ derived figures */

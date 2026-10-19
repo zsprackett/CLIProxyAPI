@@ -36,6 +36,25 @@ export function readQuotaSnapshot(provider: string, value: unknown): KnownQuotaS
   };
 }
 
+export type QuotaReadingSource = 'live' | 'snapshot' | 'none';
+
+/**
+ * Which whole reading to show: the live state in the store (from a click or a
+ * poll) or the backend snapshot. The UI never merges the two. A loaded live
+ * state wins unless the snapshot's `updated_at` is after its fetch time.
+ */
+export function newerQuotaReading(
+  quota: unknown,
+  snapshot: QuotaSnapshot | null | undefined
+): QuotaReadingSource {
+  const live = isRecord(quota) && quota.status === 'success' ? quota : null;
+  if (!snapshot) return live ? 'live' : 'none';
+  if (!live) return 'snapshot';
+  const updatedAtMs = Date.parse(snapshot.updated_at ?? '');
+  const fetchedAtMs = live.fetchedAtMs;
+  return typeof fetchedAtMs === 'number' && updatedAtMs > fetchedAtMs ? 'snapshot' : 'live';
+}
+
 const SECTION_STATUS: Record<string, (extras: QuotaExtras) => SectionStatus | undefined> = {
   'claude.usage': (extras) => (extras.kind === 'claude' ? extras.extra_usage?.status : undefined),
   'codex.usage': (extras) => (extras.kind === 'codex' ? extras.access?.status : undefined),
