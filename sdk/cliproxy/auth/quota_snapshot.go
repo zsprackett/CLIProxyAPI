@@ -234,12 +234,12 @@ func (s Section[T]) latest() time.Time {
 func mergeSection[T any](prev, next Section[T]) Section[T] {
 	switch next.status() {
 	case SectionOK:
-		if prev.status() == SectionOK && next.ValueAt.Before(prev.ValueAt) {
+		if next.ValueAt.Before(prev.ValueAt) {
 			return prev
 		}
 		return next
 	case SectionFailed:
-		if next.CheckedAt.Before(prev.latest()) {
+		if !next.CheckedAt.IsZero() && next.CheckedAt.Before(prev.latest()) {
 			return prev
 		}
 		out := prev
@@ -248,7 +248,7 @@ func mergeSection[T any](prev, next Section[T]) Section[T] {
 		out.CheckedAt = next.CheckedAt
 		return out
 	case SectionNotApplicable:
-		if next.CheckedAt.Before(prev.latest()) {
+		if !next.CheckedAt.IsZero() && next.CheckedAt.Before(prev.latest()) {
 			return prev
 		}
 		return Section[T]{Status: SectionNotApplicable, CheckedAt: next.CheckedAt}
