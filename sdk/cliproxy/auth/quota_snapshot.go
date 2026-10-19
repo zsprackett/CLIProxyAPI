@@ -229,12 +229,12 @@ func (s Section[T]) latest() time.Time {
 // mergeSection keeps the last good value across a failure and ignores an
 // absent section, so a partial observation never erases what another
 // sub-request learned. Observations apply in ObservedAt order, not arrival
-// order, so a failure or a not_applicable older than the stored section is
-// ignored.
+// order, so an ok, a failure, or a not_applicable older than the stored
+// section's latest fact is ignored.
 func mergeSection[T any](prev, next Section[T]) Section[T] {
 	switch next.status() {
 	case SectionOK:
-		if next.ValueAt.Before(prev.ValueAt) {
+		if next.ValueAt.Before(prev.latest()) {
 			return prev
 		}
 		return next
