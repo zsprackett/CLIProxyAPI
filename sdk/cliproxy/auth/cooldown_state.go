@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // CooldownStateRecord is a persisted runtime cooldown snapshot for one auth/model pair.
@@ -38,10 +40,14 @@ type CooldownStateRecord struct {
 }
 
 // UnmarshalJSON also reads the legacy quota.signals form, which QuotaState no
-// longer declares.
+// longer declares. A snapshot that does not decode is dropped with a warning,
+// so one bad record cannot block the restore of every credential.
 func (r *CooldownStateRecord) UnmarshalJSON(data []byte) error {
 	type plain CooldownStateRecord
-	var record plain
+	var record struct {
+		plain
+		Snapshot json.RawMessage `json:"snapshot"`
+	}
 	if err := json.Unmarshal(data, &record); err != nil {
 		return err
 	}
@@ -55,7 +61,17 @@ func (r *CooldownStateRecord) UnmarshalJSON(data []byte) error {
 		record.legacySignals = legacy.Quota.Signals
 		record.legacyObservedAt = legacy.Quota.ObservedAt
 	}
-	*r = CooldownStateRecord(record)
+	record.plain.Snapshot = nil
+	if len(record.Snapshot) > 0 && string(record.Snapshot) != "null" {
+		var snapshot QuotaSnapshot
+		if err := json.Unmarshal(record.Snapshot, &snapshot); err != nil {
+			log.WithFields(log.Fields{"auth_id": record.AuthID, "provider": record.Provider}).
+				Warnf("cooldown state: dropping quota snapshot that does not decode: %v", err)
+		} else {
+			record.plain.Snapshot = &snapshot
+		}
+	}
+	*r = CooldownStateRecord(record.plain)
 	return nil
 }
 
