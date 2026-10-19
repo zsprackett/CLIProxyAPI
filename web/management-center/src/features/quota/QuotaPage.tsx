@@ -56,6 +56,7 @@ import {
   buildTabCounts,
   canRefreshQuotaAfterList,
   classifyQuotaFiles,
+  countQuotaCredentials,
   filterEntriesByTab,
   filterEntriesBySearch,
   paginate,
@@ -358,16 +359,14 @@ export function QuotaPage() {
     [showIdentities]
   );
 
-  const { loadedCount, attentionCount } = useMemo(() => {
-    let loaded = 0;
-    let attention = 0;
-    entries.forEach((entry) => {
-      const status = quotaByType[entry.type][getQuotaCacheKey(entry.file)]?.status;
-      if (status === 'success') loaded += 1;
-      else if (status === 'error') attention += 1;
-    });
-    return { loadedCount: loaded, attentionCount: attention };
-  }, [entries, quotaByType]);
+  const { loadedCount, attentionCount } = useMemo(
+    () =>
+      countQuotaCredentials(
+        entries,
+        (entry) => quotaByType[entry.type][getQuotaCacheKey(entry.file)]?.status
+      ),
+    [entries, quotaByType]
+  );
 
   // 剪枝：文件列表落定后，各 provider 缓存只保留仍存在的凭证
   useEffect(() => {

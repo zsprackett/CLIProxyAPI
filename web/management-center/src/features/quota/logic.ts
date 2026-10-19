@@ -123,6 +123,20 @@ export function buildTabCounts(entries: QuotaFileEntry[]): Record<string, number
   return counts;
 }
 
+export function countQuotaCredentials(
+  entries: QuotaFileEntry[],
+  liveStatusOf: (entry: QuotaFileEntry) => string | undefined
+): { loadedCount: number; attentionCount: number } {
+  let loadedCount = 0;
+  let attentionCount = 0;
+  for (const entry of entries) {
+    const status = liveStatusOf(entry);
+    if (status === 'success') loadedCount += 1;
+    else if (status === 'error') attentionCount += 1;
+  }
+  return { loadedCount, attentionCount };
+}
+
 export const isQuotaRefreshDisabled = (
   canRefresh: boolean,
   loading: boolean,
