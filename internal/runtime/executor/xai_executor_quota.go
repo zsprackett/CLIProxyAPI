@@ -29,10 +29,12 @@ func (e *XAIExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth) (h
 		return nil, nil
 	}
 	weekly, errWeekly := e.fetchXAIBilling(ctx, auth, xaiBillingWeeklyURL)
-	monthly, errMonthly := e.fetchXAIBilling(ctx, auth, xaiBillingMonthlyURL)
-	if errWeekly != nil && errMonthly != nil {
+	if errWeekly != nil {
+		// The monthly payload carries no weekly usage, so falling back to it
+		// would replace the last weekly snapshot with an empty monthly window.
 		return nil, errWeekly
 	}
+	monthly, _ := e.fetchXAIBilling(ctx, auth, xaiBillingMonthlyURL)
 	return helps.XAIBillingQuotaHeaders(weekly, monthly, time.Now()), nil
 }
 
