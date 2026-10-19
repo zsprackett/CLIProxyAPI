@@ -356,6 +356,45 @@ describe('stale and exhausted windows', () => {
     ]);
   });
 
+  test('a Codex window with no class gets a readable label, never its slot id', () => {
+    const codex = (windows: QuotaWindow[]): QuotaSnapshot => ({
+      provider: 'codex',
+      windows,
+      extras: null,
+      last_poll: null,
+      updated_at: iso(NOW - HOUR),
+    });
+    const unclassified = render(
+      codex([
+        window({ id: 'primary', class: '', used_percent: 10, period_seconds: null }),
+        window({
+          id: 'secondary',
+          class: 'codex:monthly',
+          used_percent: 10,
+          period_seconds: 30 * 86400,
+        }),
+      ])
+    );
+    expect(renderedWindows(unclassified).map((rendered) => rendered.label)).toEqual([
+      'Usage limit',
+      'Monthly limit',
+    ]);
+    expect(unclassified).not.toContain('primary');
+
+    const upstreamLabel = render(
+      codex([
+        window({
+          id: 'primary',
+          class: '',
+          label: 'Burst',
+          used_percent: 10,
+          period_seconds: null,
+        }),
+      ])
+    );
+    expect(renderedWindows(upstreamLabel).map((rendered) => rendered.label)).toEqual(['Burst']);
+  });
+
   test('an empty snapshot or another provider reads as no data', () => {
     const empty = { provider: '', windows: [], extras: null, last_poll: null, updated_at: null };
     expect(readQuotaSnapshot('kimi', empty)).toBeNull();
