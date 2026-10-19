@@ -5,22 +5,21 @@
  *
  * Two sources feed a row:
  * - live: the provider state fetched on demand through the api-call proxy;
- * - observed: the passive quota snapshot the backend records from upstream
- *   response headers on ordinary traffic (`quota` / `model_quotas` on each
- *   auth-file entry), or from its optional background quota poll. It costs no
- *   upstream request here, so rows have data before anyone clicks refresh.
- *   Claude and Codex emit these headers; xAI billing signals (`x-xai-billing-*`)
- *   come only from the backend poll.
+ * - observed: the typed `quota_snapshot` the backend keeps per credential for
+ *   Claude, Codex, xAI, and Devin, from its quota poll and from response
+ *   headers. The backend already merged its windows. It costs no upstream
+ *   request here, so rows have data before anyone clicks refresh.
  *
  * Live data wins while it is the newer reading. When the backend records a
- * snapshot after the live fetch, the snapshot's windows replace the live ones
- * with the same id and the live-only windows (which the snapshot cannot carry)
- * are kept.
+ * snapshot after the live fetch, the snapshot's windows replace the matching
+ * live ones and the live-only windows are kept.
  */
 
 import type { AuthFileItem } from '@/types';
 import { DAY_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
+import type { QuotaProviderKind, QuotaSnapshot, QuotaWindow } from './snapshot/types';
+import { quotaWindowLabel, readQuotaSnapshot, windowStaleSinceMs } from './snapshot/windows';
 
 export interface LedgerWindow {
   id: string;
@@ -33,6 +32,10 @@ export interface LedgerWindow {
   /** Upcoming reset instant; null when no reset is pending. */
   resetAtMs: number | null;
   periodHours: number | null;
+  /** Upstream reported the window exhausted; `remaining` is then 0. */
+  limitReached?: boolean;
+  /** When the data went stale because the sub-request that owns it failed. */
+  staleSinceMs?: number | null;
 }
 
 export type LedgerSource = 'live' | 'observed' | 'none';
@@ -57,22 +60,6 @@ const toRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-
-const parseNumber = (value: unknown): number | null => {
-  if (isFiniteNumber(value)) return value;
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const parsed = Number(value.trim());
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-/** Unix seconds (Claude/Codex headers) or an ISO timestamp, in epoch ms. */
-const parseInstantMs = (value: unknown): number | null => {
-  const numeric = parseNumber(value);
-  if (numeric !== null) return numeric > 0 ? numeric * 1000 : null;
-  if (typeof value !== 'string') return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
 
 /* ------------------------------------------------------- live provider state */
 
@@ -217,41 +204,7 @@ export function livePlanType(provider: QuotaProviderType, quota: unknown): strin
   return null;
 }
 
-/* ---------------------------------------------------------- observed signals */
-
-interface SignalSnapshot {
-  observedAtMs: number;
-  /** Header names lower-cased so lookups do not depend on canonicalization. */
-  signals: Map<string, string>;
-}
-
-const readSnapshot = (value: unknown): SignalSnapshot | null => {
-  const record = toRecord(value);
-  const signals = toRecord(record?.signals);
-  if (!record || !signals) return null;
-  const observedAtMs = Date.parse(String(record.observed_at ?? ''));
-  if (!Number.isFinite(observedAtMs)) return null;
-  const map = new Map<string, string>();
-  for (const [key, raw] of Object.entries(signals)) {
-    if (typeof raw === 'string') map.set(key.toLowerCase(), raw.trim());
-  }
-  return map.size > 0 ? { observedAtMs, signals: map } : null;
-};
-
-/** The credential-wide snapshot followed by every model-scoped one, newest first. */
-const readSnapshots = (file: AuthFileItem): SignalSnapshot[] => {
-  const snapshots: SignalSnapshot[] = [];
-  const credential = readSnapshot(file.quota);
-  if (credential) snapshots.push(credential);
-  const models = toRecord(file.model_quotas);
-  if (models) {
-    for (const value of Object.values(models)) {
-      const snapshot = readSnapshot(value);
-      if (snapshot) snapshots.push(snapshot);
-    }
-  }
-  return snapshots.sort((a, b) => b.observedAtMs - a.observedAtMs);
-};
+/* ----------------------------------------------------------- quota snapshot */
 
 /**
  * A window that already reset after it was observed has fresh capacity and no
@@ -259,175 +212,95 @@ const readSnapshots = (file: AuthFileItem): SignalSnapshot[] => {
  */
 const settleWindow = (window: LedgerWindow, nowMs: number): LedgerWindow =>
   window.resetAtMs !== null && window.resetAtMs <= nowMs
-    ? { ...window, remaining: 100, resetAtMs: null }
+    ? { ...window, remaining: 100, resetAtMs: null, limitReached: false }
     : window;
 
-const CLAUDE_SIGNAL_WINDOWS = [
-  { prefix: 'five-hour', header: '5h', labelKey: 'claude_quota.five_hour', periodHours: 5 },
-  {
-    prefix: 'seven-day',
-    header: '7d',
-    labelKey: 'claude_quota.seven_day',
-    periodHours: WEEK_HOURS,
-  },
-  // The backend treats the 7d_oi window as the Fable-scoped weekly limit.
-  {
-    prefix: 'seven-day-fable',
-    header: '7d_oi',
-    labelKey: 'claude_quota.seven_day_fable',
-    periodHours: WEEK_HOURS,
-  },
-] as const;
-
-function observedClaudeWindows(snapshots: SignalSnapshot[], nowMs: number): LedgerWindow[] {
-  const windows: LedgerWindow[] = [];
-  for (const spec of CLAUDE_SIGNAL_WINDOWS) {
-    const utilizationKey = `anthropic-ratelimit-unified-${spec.header}-utilization`;
-    const resetKey = `anthropic-ratelimit-unified-${spec.header}-reset`;
-    // Each window comes from the newest snapshot that reported it; a model-scoped
-    // snapshot is the only place a model-specific window can appear.
-    const snapshot = snapshots.find(
-      (candidate) => candidate.signals.has(utilizationKey) || candidate.signals.has(resetKey)
-    );
-    if (!snapshot) continue;
-    const utilization = parseNumber(snapshot.signals.get(utilizationKey));
-    windows.push(
-      settleWindow(
-        {
-          id: spec.prefix,
-          labelKey: spec.labelKey,
-          // Utilization is a 0..1 fraction of the window consumed.
-          remaining: utilization === null ? null : clampPercent(100 - utilization * 100),
-          resetAtMs: parseInstantMs(snapshot.signals.get(resetKey)),
-          periodHours: spec.periodHours,
-        },
-        nowMs
-      )
-    );
-  }
-  return windows;
-}
-
-const codexWindowIdentity = (minutes: number | null) => {
-  if (minutes !== null && minutes > WEEK_HOURS * 60) {
-    return { id: 'monthly', labelKey: 'codex_quota.team_secondary_window' };
-  }
-  if (minutes !== null && minutes >= WEEK_HOURS * 60) {
-    return { id: 'weekly', labelKey: 'codex_quota.secondary_window' };
-  }
-  return { id: 'five-hour', labelKey: 'codex_quota.primary_window' };
+const parseIsoMs = (value: string | null | undefined): number | null => {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
-function observedCodexWindows(snapshot: SignalSnapshot, nowMs: number): LedgerWindow[] {
-  const windows: LedgerWindow[] = [];
-  for (const slot of ['primary', 'secondary'] as const) {
-    const read = (suffix: string) => snapshot.signals.get(`x-codex-${slot}-${suffix}`);
-    const used = parseNumber(read('used-percent'));
-    const minutes = parseNumber(read('window-minutes'));
-    let resetAtMs = parseInstantMs(read('reset-at'));
-    if (resetAtMs === null) {
-      const afterSeconds = parseNumber(read('reset-after-seconds'));
-      if (afterSeconds !== null && afterSeconds >= 0) {
-        resetAtMs = snapshot.observedAtMs + afterSeconds * 1000;
-      }
-    }
-    if (used === null && resetAtMs === null) continue;
-    windows.push(
-      settleWindow(
-        {
-          ...codexWindowIdentity(minutes),
-          remaining: used === null ? null : clampPercent(100 - used),
-          resetAtMs,
-          periodHours: minutes === null ? null : minutes / 60,
-        },
-        nowMs
-      )
-    );
-  }
-  return windows;
-}
-
-/** The single billing window the backend poll derives from the xAI billing endpoints. */
-function observedXaiWindows(snapshot: SignalSnapshot, nowMs: number): LedgerWindow[] {
-  const read = (suffix: string) => snapshot.signals.get(`x-xai-billing-${suffix}`);
-  const periodType = read('period-type') === 'weekly' ? 'weekly' : 'monthly';
-  const used = parseNumber(read('used-percent'));
-  const resetAtMs = parseInstantMs(read('reset-at'));
-  const minutes = parseNumber(read('window-minutes'));
-  if (used === null && resetAtMs === null) return [];
-  return [
-    settleWindow(
+/** Ledger windows for some of a snapshot's windows, in the order given. */
+export function snapshotLedgerWindows(
+  provider: QuotaProviderKind,
+  snapshot: QuotaSnapshot,
+  windows: readonly QuotaWindow[],
+  nowMs: number
+): LedgerWindow[] {
+  return windows.map((window) => {
+    const limitReached = window.limit_reached === true;
+    const used = isFiniteNumber(window.used_percent) ? window.used_percent : null;
+    return settleWindow(
       {
-        id: `xai-${periodType}`,
-        labelKey: `quota_management.ledger_window_${periodType}`,
-        remaining: used === null ? null : clampPercent(100 - used),
-        resetAtMs,
-        periodHours: minutes === null ? null : minutes / 60,
+        id: window.id,
+        ...quotaWindowLabel(provider, window),
+        remaining: limitReached ? 0 : used === null ? null : clampPercent(100 - used),
+        resetAtMs: parseIsoMs(window.reset_at),
+        periodHours: isFiniteNumber(window.period_seconds) ? window.period_seconds / 3600 : null,
+        limitReached,
+        staleSinceMs: windowStaleSinceMs(snapshot, window),
       },
       nowMs
-    ),
-  ];
+    );
+  });
 }
 
-/** Observed quota for a credential, or null when the backend recorded none. */
+const snapshotPlanType = (snapshot: QuotaSnapshot): string | null => {
+  const extras = snapshot.extras;
+  if (extras?.kind !== 'claude' && extras?.kind !== 'codex') return null;
+  const plan = extras.plan?.value;
+  if (typeof plan !== 'string' || !plan) return null;
+  return extras.kind === 'codex' ? plan.toLowerCase() : plan;
+};
+
+/** Quota the backend recorded for a credential (`quota_snapshot`), or null when it has none. */
 export function observedLedgerData(
   provider: QuotaProviderType,
   file: AuthFileItem,
   nowMs: number
 ): LedgerRowData | null {
-  if (provider !== 'claude' && provider !== 'codex' && provider !== 'xai') return null;
-  const snapshots = readSnapshots(file);
-  if (snapshots.length === 0) return null;
-
-  if (provider === 'xai') {
-    const snapshot = snapshots.find((candidate) =>
-      [...candidate.signals.keys()].some((key) => key.startsWith('x-xai-billing-'))
-    );
-    if (!snapshot) return null;
-    const windows = observedXaiWindows(snapshot, nowMs);
-    if (windows.length === 0) return null;
-    return { source: 'observed', windows, planType: null, observedAtMs: snapshot.observedAtMs };
-  }
-
-  if (provider === 'claude') {
-    const windows = observedClaudeWindows(snapshots, nowMs);
-    if (windows.length === 0) return null;
-    return { source: 'observed', windows, planType: null, observedAtMs: snapshots[0].observedAtMs };
-  }
-
-  // Codex reports the account windows on every response, so the newest snapshot
-  // that carries them is complete on its own.
-  const snapshot = snapshots.find((candidate) =>
-    [...candidate.signals.keys()].some((key) => /^x-codex-(primary|secondary)-/.test(key))
-  );
+  const snapshot = readQuotaSnapshot(provider, file.quota_snapshot);
   if (!snapshot) return null;
-  const windows = observedCodexWindows(snapshot, nowMs);
-  if (windows.length === 0) return null;
-  const plan = snapshot.signals.get('x-codex-plan-type');
+  let observedAtMs: number | null = null;
+  for (const window of snapshot.windows) {
+    const at = parseIsoMs(window.observed_at);
+    if (at !== null && (observedAtMs === null || at > observedAtMs)) observedAtMs = at;
+  }
   return {
     source: 'observed',
-    windows,
-    planType: plan ? plan.toLowerCase() : null,
-    observedAtMs: snapshot.observedAtMs,
+    windows: snapshotLedgerWindows(snapshot.provider, snapshot, snapshot.windows, nowMs),
+    planType: snapshotPlanType(snapshot),
+    observedAtMs: observedAtMs ?? parseIsoMs(snapshot.updated_at),
   };
 }
 
 /**
+ * Live windows use their own ids (`seven-day`, `five-hour`) while snapshot
+ * windows use the backend's (`seven_day`, `primary`), so a shared label also
+ * identifies the same window.
+ */
+const sameWindow = (a: LedgerWindow, b: LedgerWindow): boolean =>
+  a.id === b.id ||
+  (a.labelKey !== undefined &&
+    a.labelKey === b.labelKey &&
+    a.labelParams?.name === b.labelParams?.name);
+
+/**
  * Overlays a newer observed snapshot on an older live reading: observed windows
- * replace live windows with the same id in place, live-only windows are kept,
- * and observed-only windows are appended.
+ * replace the matching live windows in place, live-only windows are kept, and
+ * observed-only windows are appended.
  */
 function overlayObserved(live: LedgerRowData, observed: LedgerRowData): LedgerRowData {
-  const observedById = new Map(observed.windows.map((window) => [window.id, window]));
+  const pending = [...observed.windows];
   const windows = live.windows.map((window) => {
-    const replacement = observedById.get(window.id);
-    if (!replacement) return window;
-    observedById.delete(window.id);
-    return replacement;
+    const index = pending.findIndex((candidate) => sameWindow(window, candidate));
+    if (index < 0) return window;
+    return pending.splice(index, 1)[0];
   });
   return {
     source: 'observed',
-    windows: [...windows, ...observedById.values()],
+    windows: [...windows, ...pending],
     planType: live.planType ?? observed.planType,
     observedAtMs: observed.observedAtMs,
   };
@@ -487,7 +360,7 @@ export function effectiveRemaining(windows: readonly LedgerWindow[]): number | n
   return tightest;
 }
 
-const PREFERRED_WEEKLY_IDS = ['seven-day', 'weekly'];
+const PREFERRED_WEEKLY_IDS = ['seven-day', 'seven_day', 'weekly'];
 
 /**
  * The account-wide weekly window — the one the soonest-reset router orders by.

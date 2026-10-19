@@ -30,6 +30,7 @@ import {
 import type { TimelineLane, TimelineMode } from '../quotaTimelineModel';
 import type { QuotaFileEntry } from '../logic';
 import type { QuotaCardState } from '../providers';
+import { readQuotaSnapshot } from '../snapshot/windows';
 import styles from './QuotaTimeline.module.scss';
 
 const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
@@ -98,6 +99,7 @@ export function QuotaTimeline({
         ),
         provider: entry.type,
         quota: quotaFor(entry),
+        snapshot: readQuotaSnapshot(entry.type, entry.file.quota_snapshot),
       })),
     [entries, quotaFor, displayNameFor]
   );
@@ -356,7 +358,12 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
         <div className={styles.laneLimits}>
           {lane.limits.map((limit) => (
             <span key={limit.label} className={styles.laneLimit}>
-              {lane.provider === 'meta' ? t(limit.label) : limit.label} <b>{limit.remaining}%</b>
+              {limit.labelKey
+                ? t(limit.labelKey, limit.labelParams)
+                : lane.provider === 'meta'
+                  ? t(limit.label)
+                  : limit.label}{' '}
+              <b>{limit.remaining}%</b>
             </span>
           ))}
         </div>

@@ -63,6 +63,7 @@ import {
   type QuotaFileEntry,
 } from './logic';
 import { nextRecoveryMs } from './resetSchedule';
+import { readQuotaSnapshot } from './snapshot/windows';
 import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from './providers';
 import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
@@ -214,7 +215,13 @@ export function QuotaPage() {
   }, []);
 
   const resolveNextRecovery = useCallback(
-    (entry: QuotaFileEntry) => nextRecoveryMs(entry.type, getQuota(entry), sortNow),
+    (entry: QuotaFileEntry) =>
+      nextRecoveryMs(
+        entry.type,
+        getQuota(entry),
+        sortNow,
+        readQuotaSnapshot(entry.type, entry.file.quota_snapshot)
+      ),
     [getQuota, sortNow]
   );
   // 排序在分页之前：否则「最快恢复」只在当前页内成立。
