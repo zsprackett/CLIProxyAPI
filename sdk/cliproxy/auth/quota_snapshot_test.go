@@ -676,3 +676,38 @@ func TestManagerUpdateOlderCloneKeepsNewerFailure(t *testing.T) {
 		t.Fatalf("last good value lost: %+v", plan)
 	}
 }
+
+func TestQuotaSnapshotMergeSectionFailedKeepsNewestValue(t *testing.T) {
+	t16 := snapshotNow
+	t17 := snapshotNow.Add(time.Hour)
+	t18 := snapshotNow.Add(2 * time.Hour)
+	checked := snapshotNow.Add(3 * time.Hour)
+	value := func(s string, at time.Time) Section[string] {
+		return Section[string]{Status: SectionOK, Value: &s, ValueAt: at, CheckedAt: at}
+	}
+	failedWith := func(s string, at time.Time) Section[string] {
+		return Section[string]{Status: SectionFailed, Value: &s, ValueAt: at, CheckedAt: checked, Error: "503"}
+	}
+	cases := []struct {
+		name      string
+		prev      Section[string]
+		next      Section[string]
+		wantValue string
+		wantAt    time.Time
+	}{
+		{"empty prev", Section[string]{}, failedWith("v17", t17), "v17", t17},
+		{"older prev value", value("v16", t16), failedWith("v17", t17), "v17", t17},
+		{"newer prev value", value("v18", t18), failedWith("v17", t17), "v18", t18},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeSection(tc.prev, tc.next)
+			if got.Status != SectionFailed {
+				t.Fatalf("status = %q, want failed: %+v", got.Status, got)
+			}
+			if got.Value == nil || *got.Value != tc.wantValue || !got.ValueAt.Equal(tc.wantAt) {
+				t.Fatalf("value = %+v at %v, want %s at %v", got.Value, got.ValueAt, tc.wantValue, tc.wantAt)
+			}
+		})
+	}
+}

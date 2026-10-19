@@ -191,3 +191,45 @@ func TestMarkResultThrottlesObservationSaves(t *testing.T) {
 		t.Fatalf("saves after the throttle interval = %d, want 2", got)
 	}
 }
+
+func TestRestoreKeepsLastGoodValueOfSavedFailedSection(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileCooldownStateStore(t.TempDir())
+	valueAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	checkedAt := valueAt.Add(30 * time.Minute)
+	weekly := XAIWeekly{PeriodStart: Instant{Time: valueAt}, PeriodEnd: Instant{Time: valueAt.Add(7 * 24 * time.Hour)}}
+
+	newManager := func() *Manager {
+		m := NewManager(nil, nil, nil)
+		m.SetCooldownStateStore(store)
+		if _, err := m.Register(ctx, &Auth{ID: "xai-a.json", Provider: "xai", Status: StatusActive}); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+		return m
+	}
+	first := newManager()
+	first.mu.Lock()
+	first.auths["xai-a.json"].QuotaSnapshot.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: valueAt,
+		Extras: XAIExtras{Weekly: OKSection(weekly, valueAt)}})
+	first.auths["xai-a.json"].QuotaSnapshot.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: checkedAt,
+		Extras: XAIExtras{Weekly: FailedSection[XAIWeekly]("503", checkedAt)}})
+	first.mu.Unlock()
+	first.persistCooldownStates(ctx)
+
+	second := newManager()
+	if err := second.RestoreCooldownStates(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	restored, ok := second.GetByID("xai-a.json")
+	if !ok {
+		t.Fatal("auth missing after restore")
+	}
+	extras, _ := restored.QuotaSnapshot.Extras.(XAIExtras)
+	got := extras.Weekly
+	if got.Status != SectionFailed {
+		t.Fatalf("weekly status = %q, want failed: %+v", got.Status, got)
+	}
+	if got.Value == nil || !got.ValueAt.Equal(valueAt) {
+		t.Fatalf("weekly lost its last good value: %+v", got)
+	}
+}
