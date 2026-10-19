@@ -6,6 +6,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ui="$root/web/management-center"
 out="${1:-$root/static/management.html}"
+trap 'rm -f "$out.tmp"' EXIT
 
 (cd "$ui" && bun install --frozen-lockfile && bun run build)
 mkdir -p "$(dirname "$out")"

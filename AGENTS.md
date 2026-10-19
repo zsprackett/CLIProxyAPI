@@ -14,6 +14,7 @@ go test ./... # Run all tests
 go test -v -run TestName ./path/to/pkg # Run single test
 go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRED after changes)
 ./build-panel.sh # Build web/management-center into static/management.html (needs bun 1.3.14)
+# A local panel build needs `disable-auto-update-panel: true`, or the panel auto-updater replaces it with a GitHub release
 ```
 - Common flags: `--config <path>`, `--tui`, `--standalone`, `--local-model`, `--no-browser`, `--oauth-callback-port <port>`
 

@@ -39,3 +39,6 @@ bin
 .bmad
 _bmad
 _bmad-output
+
+# Web UI source (built separately with build-panel.sh)
+web
