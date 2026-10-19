@@ -1,0 +1,28 @@
+.alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.firing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: $radius-md;
+  border: 1px solid color-mix(in srgb, var(--viz-failure) 40%, transparent);
+  background: color-mix(in srgb, var(--viz-failure) 10%, transparent);
+  color: var(--text-primary);
+}
+
+.line {
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resolved {
+  padding: 0 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}

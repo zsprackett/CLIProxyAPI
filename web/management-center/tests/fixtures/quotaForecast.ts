@@ -1,0 +1,212 @@
+/** Raw /observability/quota/forecast payload for the claude tab (fictional credentials). */
+
+export const NOW_S = 1784548800; // 2026-07-20T12:00:00Z, a Monday
+export const NOW_MS = NOW_S * 1000;
+const H = 3600;
+const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
+
+export const ALPHA_KEY_HASH = '4e9f7b2de42c'; // sha256('sk-team-alpha')[:12]
+export const BETA_KEY_HASH = 'c81f65615e76'; // sha256('sk-solo-beta')[:12]
+
+export function rawClaudeForecast() {
+  return {
+    enabled: true,
+    generated_at: iso(NOW_S),
+    recording_since: iso(NOW_S - 48 * H),
+    quota_poll_enabled: true,
+    routing_strategy: 'round-robin',
+    drain_model: 'spread',
+    lookback_hours: 24,
+    retention_days: 14,
+    pools: [
+      {
+        class: 'claude:5h',
+        provider: 'claude',
+        window: '5h',
+        window_seconds: 5 * H,
+        model_scoped: false,
+        accounts_total: 2,
+        accounts_with_data: 2,
+        remaining_accounts: 1.2,
+        next_reset_at: iso(NOW_S + 5 * H),
+        burn: {
+          accounts_per_hour: 0.2,
+          low: 0.1,
+          high: 0.3,
+          coverage_seconds: 6 * H,
+          sufficient: true,
+        },
+        runway: {
+          status: 'short',
+          exhausts_at: iso(NOW_S + 3 * H),
+          recovers_at: iso(NOW_S + 5 * H),
+          short_seconds: 2 * H,
+          short_accounts: 0.4,
+          spare_at_next_reset_accounts: null,
+          trough_accounts: 0,
+          trough_at: iso(NOW_S + 3 * H),
+          horizon_end: iso(NOW_S + 6 * H),
+        },
+        pace: { used_percent: 40, expected_percent: 30, delta_pp: 10 },
+        accounts: [
+          {
+            auth_id: 'b',
+            name: 'bob@example.com.json',
+            used_percent: 40,
+            remaining_percent: 60,
+            reset_at: iso(NOW_S + 5 * H),
+            observed_at: iso(NOW_S - 300),
+            elapsed_fraction: 0.3,
+            pace_delta_pp: 10,
+            burn_percent_per_hour: 10,
+            projected_used_at_reset: 140,
+          },
+          {
+            auth_id: 'a',
+            name: 'alice@example.com.json',
+            used_percent: 40,
+            remaining_percent: 60,
+            reset_at: null,
+            observed_at: iso(NOW_S - 300),
+            elapsed_fraction: null,
+            pace_delta_pp: null,
+            burn_percent_per_hour: 10,
+            projected_used_at_reset: null,
+          },
+        ],
+        chart: {
+          start: NOW_S - 6 * H,
+          now: NOW_S,
+          end: NOW_S + 6 * H,
+          step_seconds: 3 * H,
+          history: {
+            times: [NOW_S - 6 * H, NOW_S - 3 * H, NOW_S],
+            total: [null, 1.6, 1.2],
+            by_account: [
+              { auth_id: 'b', values: [null, 80, 60] },
+              { auth_id: 'a', values: [null, 80, 60] },
+            ],
+          },
+          projection: {
+            times: [NOW_S, NOW_S + 3 * H, NOW_S + 6 * H],
+            central: [1.2, 0.4, 1.0],
+            optimistic: [1.2, 0.8, 1.4],
+            pessimistic: [1.2, 0, 0.6],
+          },
+          resets: [{ at: NOW_S + 5 * H, auth_id: 'b' }],
+          danger: [{ from: NOW_S + 3 * H, to: NOW_S + 5 * H, severity: 'projected' }],
+        },
+        hourly_burn: [
+          [NOW_S - H, 0.2, 1],
+          [NOW_S - 2 * H, 0.1, 0.5],
+        ],
+        attribution: {
+          method: 'nnls',
+          r2: 0.82,
+          rows: 12,
+          models: [
+            {
+              model: 'claude-opus',
+              tokens: 2_000_000,
+              requests: 10,
+              burn_accounts: 0.8,
+              percent_per_mtok: 40,
+              share: 0.8,
+            },
+          ],
+          clients: [
+            {
+              key_hash: ALPHA_KEY_HASH,
+              key_masked: 'sk**********ha',
+              tokens: 1_500_000,
+              requests: 6,
+              burn_accounts: 0.6,
+              percent_per_mtok: 40,
+              share: 0.6,
+            },
+            {
+              key_hash: BETA_KEY_HASH,
+              tokens: 300_000,
+              requests: 2,
+              burn_accounts: 0.1,
+              percent_per_mtok: 33.3,
+              share: 0.1,
+            },
+            {
+              key_hash: 'abcdef123456',
+              key_masked: 'zz******yy',
+              tokens: 100_000,
+              requests: 1,
+              burn_accounts: 0.05,
+              percent_per_mtok: 50,
+              share: 0.05,
+            },
+            { key_hash: '-', tokens: 100_000, requests: 1, burn_accounts: 0.05, share: 0.05 },
+          ],
+          agents: [
+            {
+              agent: 'claude-cli',
+              tokens: 1_900_000,
+              requests: 9,
+              burn_accounts: 0.75,
+              share: 0.75,
+            },
+            { agent: '-', tokens: 100_000, requests: 1, burn_accounts: 0.05, share: 0.05 },
+          ],
+        },
+      },
+      {
+        class: 'claude:7d',
+        provider: 'claude',
+        window: '7d',
+        window_seconds: 168 * H,
+        model_scoped: false,
+        accounts_total: 2,
+        accounts_with_data: 2,
+        remaining_accounts: 1.5,
+        next_reset_at: iso(NOW_S + 72 * H),
+        burn: {
+          accounts_per_hour: 0.01,
+          low: 0.005,
+          high: 0.02,
+          coverage_seconds: 48 * H,
+          sufficient: true,
+        },
+        runway: {
+          status: 'ok',
+          exhausts_at: null,
+          recovers_at: null,
+          short_seconds: 0,
+          short_accounts: 0,
+          spare_at_next_reset_accounts: 0.78,
+          trough_accounts: 0.78,
+          trough_at: null,
+          horizon_end: iso(NOW_S + 168 * H),
+        },
+        pace: null,
+      },
+    ],
+    alerts: [
+      {
+        class: 'claude:5h',
+        provider: 'claude',
+        state: 'firing',
+        fired_at: iso(NOW_S - 600),
+        exhausts_at: iso(NOW_S + 3 * H),
+        recovers_at: iso(NOW_S + 5 * H),
+        short_accounts: 0.4,
+        remaining_accounts: 1.2,
+      },
+      {
+        class: 'codex:weekly',
+        provider: 'codex',
+        state: 'resolved',
+        fired_at: iso(NOW_S - 6 * H),
+        exhausts_at: null,
+        recovers_at: null,
+        short_accounts: 0,
+        remaining_accounts: 3,
+      },
+    ],
+  };
+}

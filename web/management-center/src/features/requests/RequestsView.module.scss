@@ -1,0 +1,142 @@
+@use '../../styles/mixins' as *;
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-sm $spacing-md;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+
+  button {
+    padding: 4px 14px;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+      color: var(--text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+
+    &[aria-pressed='true'] {
+      color: var(--text-primary);
+      font-weight: 600;
+      background: var(--floating-surface, var(--bg-primary));
+      border-color: var(--border-hover);
+    }
+  }
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-radius: $radius-md;
+  border: 1px solid color-mix(in srgb, var(--viz-failure) 40%, transparent);
+  background: color-mix(in srgb, var(--viz-failure) 8%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+
+  p {
+    margin: 0;
+  }
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.timelineHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+
+  h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 650;
+    color: var(--text-primary);
+  }
+}
+
+.sessionId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}

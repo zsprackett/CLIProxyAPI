@@ -1,0 +1,43 @@
+@use '../../styles/mixins' as *;
+
+.wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.badge {
+  --verdict-color: var(--text-tertiary);
+
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--verdict-color);
+  background: color-mix(in srgb, var(--verdict-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--verdict-color) 35%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+
+  &[data-verdict='hit'] {
+    --verdict-color: var(--viz-success);
+  }
+
+  &[data-verdict='partial'] {
+    --verdict-color: var(--viz-partial, #c98a12);
+  }
+
+  &[data-verdict='miss'] {
+    --verdict-color: var(--viz-failure);
+  }
+}
+
+.cause {
+  max-width: 180px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  @include text-ellipsis;
+}
