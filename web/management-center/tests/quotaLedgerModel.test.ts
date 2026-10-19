@@ -253,6 +253,7 @@ describe('observed xAI quota', () => {
     expect(data?.windows).toEqual([
       {
         id: 'weekly',
+        class: 'xai:weekly',
         labelKey: 'quota_management.ledger_window_weekly',
         remaining: 62.5,
         resetAtMs: NOW + 2 * DAY,
@@ -262,6 +263,7 @@ describe('observed xAI quota', () => {
       },
       {
         id: 'monthly',
+        class: 'xai:monthly',
         labelKey: 'quota_management.ledger_window_monthly',
         remaining: 10,
         resetAtMs: NOW + 20 * DAY,

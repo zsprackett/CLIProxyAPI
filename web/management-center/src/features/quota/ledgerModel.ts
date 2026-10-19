@@ -39,6 +39,8 @@ export interface LedgerWindow {
   /** Upcoming reset instant; null when no reset is pending. */
   resetAtMs: number | null;
   periodHours: number | null;
+  /** Backend window class (e.g. `codex:weekly`); only snapshot windows carry one. */
+  class?: string;
   /**
    * Upstream reported the window exhausted and `remaining` is 0. The backend
    * copies `limit_reached` onto every slot of a Codex namespace, so a window
@@ -258,6 +260,7 @@ export function snapshotLedgerWindows(
         remaining,
         resetAtMs: parseIsoMs(window.reset_at),
         periodHours: isFiniteNumber(window.period_seconds) ? window.period_seconds / 3600 : null,
+        class: window.class,
         limitReached,
         staleSinceMs: windowStaleSinceMs(snapshot, window),
       },
@@ -338,17 +341,24 @@ export function effectiveRemaining(windows: readonly LedgerWindow[]): number | n
 }
 
 const PREFERRED_WEEKLY_IDS = ['seven-day', 'seven_day', 'weekly'];
+const ACCOUNT_WEEKLY_CLASSES = ['claude:7d', 'codex:weekly', 'xai:weekly'];
 
 /**
  * The account-wide weekly window — the one the soonest-reset router orders by.
  * Model-scoped weekly windows are only used when no account-wide one exists.
  */
 export function weeklyWindow(windows: readonly LedgerWindow[]): LedgerWindow | null {
-  const preferred = windows.find((window) => PREFERRED_WEEKLY_IDS.includes(window.id));
+  const preferred = windows.find(
+    (window) =>
+      PREFERRED_WEEKLY_IDS.includes(window.id) ||
+      (window.class !== undefined && ACCOUNT_WEEKLY_CLASSES.includes(window.class))
+  );
   if (preferred) return preferred;
+  // Display-only snapshot windows (class "") never stand in for the account weekly.
   return (
     windows.find(
       (window) =>
+        window.class !== '' &&
         window.periodHours !== null &&
         window.periodHours >= WEEK_HOURS - 24 &&
         window.periodHours <= WEEK_HOURS + 24
