@@ -243,6 +243,10 @@ func mergeSection[T any](prev, next Section[T]) Section[T] {
 			return prev
 		}
 		out := prev
+		if next.Value != nil && (prev.Value == nil || !next.ValueAt.Before(prev.ValueAt)) {
+			out.Value = next.Value
+			out.ValueAt = next.ValueAt
+		}
 		out.Status = SectionFailed
 		out.Error = next.Error
 		out.CheckedAt = next.CheckedAt
