@@ -38,6 +38,21 @@ const render = (snapshot: QuotaSnapshot) => {
 
 const barCount = (markup: string) => (markup.match(/width:/g) ?? []).length;
 
+/** The visible text of each rendered window, in order: label, percent, then the rest. */
+const renderedWindows = (markup: string) =>
+  markup
+    .split('<div class="window">')
+    .slice(1)
+    .map((chunk) => {
+      const text = (className: string) =>
+        new RegExp(`<span class="${className}">([^<]*)</span>`).exec(chunk)?.[1] ?? null;
+      return {
+        label: text('windowLabel'),
+        percent: text('windowPercent'),
+        limitReached: chunk.includes('Limit reached'),
+      };
+    });
+
 let originalLanguage = 'en';
 beforeAll(async () => {
   originalLanguage = i18n.language;
@@ -213,6 +228,53 @@ describe('stale and exhausted windows', () => {
     expect(markup).toContain('Limit reached');
     expect(markup).toContain('0%');
     expect(markup).not.toContain('Unknown');
+  });
+
+  test('a known percent wins over a namespace-wide limit_reached', () => {
+    const codex: QuotaSnapshot = {
+      provider: 'codex',
+      windows: [
+        window({
+          id: 'primary',
+          class: 'codex:5h',
+          used_percent: 100,
+          limit_reached: true,
+          reset_at: iso(NOW + 2 * HOUR),
+          period_seconds: 18000,
+          section: 'codex.usage',
+        }),
+        window({
+          id: 'secondary',
+          class: 'codex:weekly',
+          used_percent: 30,
+          limit_reached: true,
+          reset_at: iso(NOW + 3 * DAY),
+          section: 'codex.usage',
+        }),
+      ],
+      extras: null,
+      last_poll: null,
+      updated_at: iso(NOW - HOUR),
+    };
+
+    expect(renderedWindows(render(codex))).toEqual([
+      { label: '5-hour limit', percent: '0%', limitReached: true },
+      { label: 'Weekly limit', percent: '70%', limitReached: false },
+    ]);
+
+    const lane = buildTimelineLane({
+      name: 'c',
+      displayName: 'c',
+      provider: 'codex',
+      quota: undefined,
+      snapshot: codex,
+      maxPeriodHours: 14 * 24,
+    });
+    expect(lane.remaining).toBe(70);
+    expect(lane.limits.map((limit) => [limit.labelKey, limit.remaining])).toEqual([
+      ['codex_quota.primary_window', 0],
+      ['codex_quota.secondary_window', 70],
+    ]);
   });
 
   test('an empty snapshot or another provider reads as no data', () => {
