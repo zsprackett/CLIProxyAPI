@@ -394,6 +394,113 @@ func TestQuotaSnapshotCloneIsIndependent(t *testing.T) {
 	}
 }
 
+func TestQuotaSnapshotApplyReportsProviderOnZeroSnapshot(t *testing.T) {
+	var s QuotaSnapshot
+	if changed := s.apply(QuotaObservation{Provider: ProviderClaude, Source: SourcePoll, ObservedAt: snapshotNow}); !changed {
+		t.Fatalf("setting the provider on a zero snapshot must report a change: %+v", s)
+	}
+	if s.Provider != ProviderClaude {
+		t.Fatalf("provider = %q, want claude", s.Provider)
+	}
+}
+
+func TestQuotaSnapshotApplyIgnoresEqualExtras(t *testing.T) {
+	obs := QuotaObservation{Provider: ProviderCodex, Source: SourcePoll, ObservedAt: snapshotNow,
+		Windows: []QuotaWindowObs{window("primary", 10, snapshotNow, SectionCodexUsage, SourcePoll)},
+		Extras: CodexExtras{
+			Plan:   OKSection("pro", snapshotNow),
+			Access: OKSection(CodexAccess{Allowed: boolPtr(true), LimitReached: boolPtr(false)}, snapshotNow),
+		}}
+	var s QuotaSnapshot
+	if !s.apply(obs) {
+		t.Fatal("first apply must report a change")
+	}
+	before := s.UpdatedAt
+	if s.apply(obs) {
+		t.Fatalf("a repeated observation with equal extras must not report a change: %+v", s.Extras)
+	}
+	if !s.UpdatedAt.Equal(before) {
+		t.Fatalf("UpdatedAt moved on a no-op apply: %v -> %v", before, s.UpdatedAt)
+	}
+}
+
+func TestQuotaSnapshotMergeSectionIgnoresOlderFailure(t *testing.T) {
+	earlier := snapshotNow.Add(-time.Hour)
+	var s QuotaSnapshot
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: snapshotNow,
+		Sections: map[SectionID]SectionStatus{SectionXAIWeekly: SectionOK},
+		Windows:  []QuotaWindowObs{window("weekly", 42, snapshotNow, SectionXAIWeekly, SourcePoll)},
+		Extras:   XAIExtras{Access: XAIAccessGrokCLI, Weekly: OKSection(XAIWeekly{}, snapshotNow)}})
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: earlier,
+		Sections: map[SectionID]SectionStatus{SectionXAIWeekly: SectionFailed},
+		Extras:   XAIExtras{Weekly: FailedSection[XAIWeekly]("503", earlier)}})
+	weekly := s.Extras.(XAIExtras).Weekly
+	if weekly.Status != SectionOK || weekly.Error != "" || !weekly.CheckedAt.Equal(snapshotNow) {
+		t.Fatalf("an older failure must not mark a newer ok section stale: %+v", weekly)
+	}
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: earlier,
+		Extras: XAIExtras{Monthly: Section[XAIMonthly]{Status: SectionNotApplicable, CheckedAt: earlier}}})
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: snapshotNow,
+		Extras: XAIExtras{Monthly: OKSection(XAIMonthly{}, snapshotNow)}})
+	s.apply(QuotaObservation{Provider: ProviderXAI, Source: SourcePoll, ObservedAt: earlier,
+		Extras: XAIExtras{Monthly: Section[XAIMonthly]{Status: SectionNotApplicable, CheckedAt: earlier}}})
+	if monthly := s.Extras.(XAIExtras).Monthly; monthly.Status != SectionOK || monthly.Value == nil {
+		t.Fatalf("an older not_applicable must not clear a newer ok section: %+v", monthly)
+	}
+}
+
+func TestQuotaSnapshotOlderPollKeepsNewerWindowsOfItsSection(t *testing.T) {
+	earlier := snapshotNow.Add(-time.Hour)
+	var s QuotaSnapshot
+	s.apply(QuotaObservation{Provider: ProviderCodex, Source: SourcePoll, ObservedAt: snapshotNow,
+		Sections: map[SectionID]SectionStatus{SectionCodexUsage: SectionOK},
+		Windows: []QuotaWindowObs{
+			window("primary", 10, snapshotNow, SectionCodexUsage, SourcePoll),
+			window("additional.GPT-5.3-Codex-Spark.primary", 20, snapshotNow, SectionCodexUsage, SourcePoll),
+		}})
+	s.apply(QuotaObservation{Provider: ProviderCodex, Source: SourcePoll, ObservedAt: earlier,
+		Sections: map[SectionID]SectionStatus{SectionCodexUsage: SectionOK},
+		Windows:  []QuotaWindowObs{window("primary", 5, earlier, SectionCodexUsage, SourcePoll)}})
+	w, ok := snapshotWindow(s, "additional.GPT-5.3-Codex-Spark.primary", "")
+	if !ok || !w.ObservedAt.Equal(snapshotNow) {
+		t.Fatalf("an older poll retired a window the newer poll returned: %+v", s.Windows)
+	}
+	if primary, _ := snapshotWindow(s, "primary", ""); func() float64 { v, _ := primary.Used.Get(); return v }() != 10 {
+		t.Fatalf("older poll replaced the newer primary window: %+v", primary)
+	}
+}
+
+func TestQuotaSnapshotDropsLongExpiredHeaderWindows(t *testing.T) {
+	start := snapshotNow
+	expiredAt := start.Add(time.Hour)
+	headers := func(at time.Time, extra ...QuotaWindowObs) QuotaObservation {
+		windows := append([]QuotaWindowObs{{ID: "primary", Used: KnownPercent(1), Period: 5 * time.Hour, ResetAt: at.Add(time.Hour), Section: SectionHeaders, Source: SourceHeaders, ObservedAt: at}}, extra...)
+		return QuotaObservation{Provider: ProviderCodex, Source: SourceHeaders, ObservedAt: at, Windows: windows}
+	}
+	var s QuotaSnapshot
+	s.apply(headers(start,
+		QuotaWindowObs{ID: "additional.old-limit.primary", Used: KnownPercent(50), Period: 5 * time.Hour, ResetAt: expiredAt, Section: SectionHeaders, Source: SourceHeaders, ObservedAt: start},
+		QuotaWindowObs{ID: "additional.no-period.primary", Used: KnownPercent(50), ResetAt: expiredAt, Section: SectionHeaders, Source: SourceHeaders, ObservedAt: start},
+	))
+	s.apply(headers(expiredAt.Add(4 * time.Hour)))
+	if _, ok := snapshotWindow(s, "additional.old-limit.primary", ""); !ok {
+		t.Fatalf("a window reset less than one period ago was dropped: %+v", s.Windows)
+	}
+	s.apply(headers(expiredAt.Add(5*time.Hour + time.Minute)))
+	if _, ok := snapshotWindow(s, "additional.old-limit.primary", ""); ok {
+		t.Fatalf("a header window reset more than one period ago survived: %+v", s.Windows)
+	}
+	if _, ok := snapshotWindow(s, "additional.no-period.primary", ""); !ok {
+		t.Fatalf("a window with an unknown period was dropped before 8 days: %+v", s.Windows)
+	}
+	s.apply(headers(expiredAt.Add(8*24*time.Hour + time.Minute)))
+	if _, ok := snapshotWindow(s, "additional.no-period.primary", ""); ok {
+		t.Fatalf("a window with an unknown period survived past 8 days: %+v", s.Windows)
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
 func BenchmarkObserveClaudeHeaders(b *testing.B) {
 	h := http.Header{}
 	h.Set("Anthropic-Ratelimit-Unified-5h-Utilization", "0.25")
