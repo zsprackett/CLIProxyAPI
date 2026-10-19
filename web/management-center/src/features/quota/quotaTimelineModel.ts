@@ -13,7 +13,13 @@
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 import type { QuotaSnapshot } from './snapshot/types';
-import { isCapacityWindow, newerQuotaReading, quotaWindowLabel } from './snapshot/windows';
+import {
+  isCapacityWindow,
+  newerQuotaReading,
+  quotaWindowLabel,
+  remainingFromUsed,
+  snapshotWindowRemaining,
+} from './snapshot/windows';
 
 export { DAY_MS, HOUR_MS };
 
@@ -355,12 +361,7 @@ function snapshotLane(
         typeof window.period_seconds === 'number' && window.period_seconds > 0
           ? window.period_seconds / 3600
           : null,
-      remaining:
-        typeof window.used_percent === 'number'
-          ? clampPercent(100 - window.used_percent)
-          : window.limit_reached
-            ? 0
-            : null,
+      remaining: snapshotWindowRemaining(window),
     };
   });
   const candidates = windows.filter(
@@ -480,14 +481,13 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
       // Claude and Codex store percent USED.
-      remaining:
-        typeof chosen.usedPercent === 'number' ? clampPercent(100 - chosen.usedPercent) : null,
+      remaining: remainingFromUsed(chosen.usedPercent),
       limits: windows
-        .filter((window) => typeof window.usedPercent === 'number')
         .map((window) => ({
           label: window.label ?? '',
-          remaining: clampPercent(100 - (window.usedPercent as number)),
-        })),
+          remaining: remainingFromUsed(window.usedPercent),
+        }))
+        .filter((limit): limit is TimelineLimit => limit.remaining !== null),
       resetCredits,
     };
   }
@@ -530,8 +530,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     if (!billing || billing.periodType !== 'weekly') return empty;
     if (typeof billing.resetAtMs !== 'number' || !Number.isFinite(billing.resetAtMs)) return empty;
 
-    const remaining =
-      typeof billing.usagePercent === 'number' ? clampPercent(100 - billing.usagePercent) : null;
+    const remaining = remainingFromUsed(billing.usagePercent);
 
     return {
       ...empty,
@@ -545,8 +544,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       limits: (billing.productUsage ?? [])
         .map((entry) => ({
           label: entry.product ?? '',
-          remaining:
-            typeof entry.usagePercent === 'number' ? clampPercent(100 - entry.usagePercent) : null,
+          remaining: remainingFromUsed(entry.usagePercent),
         }))
         .filter((limit): limit is TimelineLimit => limit.remaining !== null),
     };
@@ -624,20 +622,15 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     const chosen = pickLaneWindow(windows, maxPeriodHours);
     if (!chosen) return empty;
 
-    const remainingOf = (window: MetaWindowLike) =>
-      typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent)
-        ? clampPercent(100 - window.usedPercent)
-        : null;
-
     return {
       ...empty,
       anchorMs: chosen.resetAtMs,
       periodHours: chosen.periodHours,
-      remaining: remainingOf(chosen),
+      remaining: remainingFromUsed(chosen.usedPercent),
       limits: windows
         .map((window) => ({
           label: `meta_quota.${window.id}`,
-          remaining: remainingOf(window),
+          remaining: remainingFromUsed(window.usedPercent),
         }))
         .filter((limit): limit is TimelineLimit => limit.remaining !== null),
     };

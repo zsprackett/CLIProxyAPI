@@ -1,6 +1,7 @@
 /**
  * Readers of `quota_snapshot` shared by the ledger, the timeline, the reset
- * schedule, and the auth-file card, so they agree on labels and staleness.
+ * schedule, and the auth-file card, so they agree on labels, percents, and
+ * staleness.
  */
 
 import type {
@@ -34,6 +35,18 @@ export function readQuotaSnapshot(provider: string, value: unknown): KnownQuotaS
     extras: isRecord(value.extras) ? (value.extras as unknown as QuotaExtras) : null,
     windows,
   };
+}
+
+/** Remaining percent, 0..100, from a percent used; null when the percent is unknown. */
+export function remainingFromUsed(used: unknown): number | null {
+  return typeof used === 'number' && Number.isFinite(used)
+    ? Math.min(100, Math.max(0, 100 - used))
+    : null;
+}
+
+/** A known percent wins; `limit_reached` only fills an unknown percent, as 0 remaining. */
+export function snapshotWindowRemaining(window: QuotaWindow): number | null {
+  return remainingFromUsed(window.used_percent) ?? (window.limit_reached === true ? 0 : null);
 }
 
 export type QuotaReadingSource = 'live' | 'snapshot' | 'none';

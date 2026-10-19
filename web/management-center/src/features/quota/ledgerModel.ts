@@ -23,6 +23,8 @@ import {
   type KnownQuotaSnapshot,
   quotaWindowLabel,
   readQuotaSnapshot,
+  remainingFromUsed,
+  snapshotWindowRemaining,
   windowStaleSinceMs,
 } from './snapshot/windows';
 
@@ -89,7 +91,7 @@ const fromUsedPercent = (window: UsedPercentWindowLike, index: number): LedgerWi
   label: window.label,
   labelKey: window.labelKey,
   labelParams: window.labelParams,
-  remaining: isFiniteNumber(window.usedPercent) ? clampPercent(100 - window.usedPercent) : null,
+  remaining: remainingFromUsed(window.usedPercent),
   resetAtMs: isFiniteNumber(window.resetAtMs) ? window.resetAtMs : null,
   periodHours: isFiniteNumber(window.periodHours) ? window.periodHours : null,
 });
@@ -180,7 +182,7 @@ export function liveLedgerWindows(
     return windows.map((window) => ({
       id: window.id,
       labelKey: `meta_quota.${window.id}`,
-      remaining: isFiniteNumber(window.usedPercent) ? clampPercent(100 - window.usedPercent) : null,
+      remaining: remainingFromUsed(window.usedPercent),
       resetAtMs: isFiniteNumber(window.resetAt) ? window.resetAt * 1000 : null,
       periodHours: window.id === 'weekly' ? WEEK_HOURS : null,
     }));
@@ -195,7 +197,7 @@ export function liveLedgerWindows(
       {
         id: `xai-${periodType}`,
         labelKey: `quota_management.ledger_window_${periodType}`,
-        remaining: isFiniteNumber(usage) ? clampPercent(100 - usage) : null,
+        remaining: remainingFromUsed(usage),
         resetAtMs: isFiniteNumber(billing.resetAtMs) ? billing.resetAtMs : null,
         periodHours: isFiniteNumber(billing.periodHours) ? billing.periodHours : null,
       },
@@ -247,9 +249,7 @@ export function snapshotLedgerWindows(
   nowMs: number
 ): LedgerWindow[] {
   return windows.map((window) => {
-    const used = isFiniteNumber(window.used_percent) ? window.used_percent : null;
-    const remaining =
-      used !== null ? clampPercent(100 - used) : window.limit_reached === true ? 0 : null;
+    const remaining = snapshotWindowRemaining(window);
     const limitReached = window.limit_reached === true && remaining === 0;
     return settleWindow(
       {
@@ -262,7 +262,7 @@ export function snapshotLedgerWindows(
         staleSinceMs: windowStaleSinceMs(snapshot, window),
       },
       nowMs,
-      used !== null
+      remainingFromUsed(window.used_percent) !== null
     );
   });
 }
