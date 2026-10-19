@@ -39,7 +39,8 @@ export interface QuotaWindow {
   /** The upstream sub-request that owns the window: `claude.usage`, `xai.weekly`, `headers`, ... */
   section: string;
   source: QuotaWindowSource;
-  observed_at: string;
+  /** Null when the backend has no observation time for the window. */
+  observed_at: string | null;
 }
 
 export interface ClaudeExtraUsage {
@@ -70,7 +71,8 @@ export interface CodexResetCredit {
 export interface CodexResetCredits {
   available: number | null;
   applicable_available: number | null;
-  credits: CodexResetCredit[];
+  /** Go encodes a nil slice as null. */
+  credits: CodexResetCredit[] | null;
 }
 
 export interface XaiProductUsage {
@@ -81,7 +83,8 @@ export interface XaiProductUsage {
 export interface XaiWeekly {
   period_start: string | null;
   period_end: string | null;
-  product_usage: XaiProductUsage[];
+  /** Go encodes a nil slice as null. */
+  product_usage: XaiProductUsage[] | null;
 }
 
 export interface XaiMonthly {

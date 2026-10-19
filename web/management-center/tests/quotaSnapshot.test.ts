@@ -395,6 +395,64 @@ describe('stale and exhausted windows', () => {
     expect(renderedWindows(upstreamLabel).map((rendered) => rendered.label)).toEqual(['Burst']);
   });
 
+  test('null observation times and null arrays from Go still render', () => {
+    const xaiNulls: QuotaSnapshot = {
+      ...xai,
+      windows: [
+        window({
+          id: 'weekly',
+          class: 'xai:weekly',
+          used_percent: 42,
+          section: 'xai.weekly',
+          observed_at: null,
+        }),
+      ],
+      extras: {
+        kind: 'xai',
+        access: 'grok_cli',
+        weekly: {
+          ...section('failed', { period_start: null, period_end: null, product_usage: null }),
+          error: 'HTTP 503',
+        },
+        monthly: section('absent'),
+        account: section('absent'),
+        paid_health: section('absent'),
+      },
+    };
+    expect(renderedWindows(render(xaiNulls))).toEqual([
+      { label: 'Weekly limit', percent: '58%', limitReached: false },
+    ]);
+    expect(render(xaiNulls)).not.toContain('Stale since');
+    const file: AuthFileItem = { name: 'xai.json', type: 'xai', quota_snapshot: xaiNulls };
+    expect(observedLedgerData('xai', file, NOW)?.observedAtMs).toBe(NOW - HOUR);
+
+    const codexNulls: QuotaSnapshot = {
+      provider: 'codex',
+      windows: [
+        window({
+          id: 'secondary',
+          class: 'codex:weekly',
+          used_percent: 20,
+          section: 'codex.usage',
+          observed_at: null,
+        }),
+      ],
+      extras: {
+        kind: 'codex',
+        plan: section('ok', 'Plus'),
+        access: section('absent'),
+        credits: section('absent'),
+        subscription: section('absent'),
+        reset_credits: section('ok', { available: 0, applicable_available: 0, credits: null }),
+      },
+      last_poll: null,
+      updated_at: iso(NOW - HOUR),
+    };
+    expect(renderedWindows(render(codexNulls))).toEqual([
+      { label: 'Weekly limit', percent: '80%', limitReached: false },
+    ]);
+  });
+
   test('an empty snapshot or another provider reads as no data', () => {
     const empty = { provider: '', windows: [], extras: null, last_poll: null, updated_at: null };
     expect(readQuotaSnapshot('kimi', empty)).toBeNull();

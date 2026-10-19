@@ -84,7 +84,7 @@ const SECTION_STATUS: Record<string, (extras: QuotaExtras) => SectionStatus | un
 export function windowStaleSinceMs(snapshot: QuotaSnapshot, window: QuotaWindow): number | null {
   const read = SECTION_STATUS[window.section];
   if (!read || !snapshot.extras || read(snapshot.extras) !== 'failed') return null;
-  const observedAtMs = Date.parse(window.observed_at);
+  const observedAtMs = Date.parse(window.observed_at ?? '');
   return Number.isFinite(observedAtMs) ? observedAtMs : null;
 }
 
