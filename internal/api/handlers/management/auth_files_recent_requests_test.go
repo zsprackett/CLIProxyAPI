@@ -17,6 +17,11 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 
 	manager := coreauth.NewManager(nil, nil, nil)
+	var codexSnapshot coreauth.QuotaSnapshot
+	codexSnapshot.ObserveResponseHeaders("codex", "gpt-5", http.Header{
+		"X-Codex-Primary-Used-Percent":   []string{"58"},
+		"X-Codex-Primary-Window-Minutes": []string{"10080"},
+	}, time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC))
 	record := &coreauth.Auth{
 		ID:       "runtime-only-auth-1",
 		Provider: "codex",
@@ -26,22 +31,7 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
 		Metadata: map[string]any{
 			"type": "codex",
 		},
-		Quota: coreauth.QuotaState{
-			ObservedAt: time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
-			Signals: map[string]string{
-				"X-Codex-Primary-Used-Percent": "58",
-			},
-		},
-		ModelStates: map[string]*coreauth.ModelState{
-			"gpt-5": {
-				Quota: coreauth.QuotaState{
-					ObservedAt: time.Date(2026, 8, 22, 0, 1, 0, 0, time.UTC),
-					Signals: map[string]string{
-						"Retry-After": "120",
-					},
-				},
-			},
-		},
+		QuotaSnapshot: codexSnapshot,
 	}
 	if _, errRegister := manager.Register(context.Background(), record); errRegister != nil {
 		t.Fatalf("failed to register auth record: %v", errRegister)
@@ -52,8 +42,9 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, "/v0/management/auth-files", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v8/management/credentials", nil)
 	ginCtx.Request = req
+	ginCtx.Set(ConfigV8ContextKey, true)
 
 	h.ListAuthFiles(ginCtx)
 
@@ -85,29 +76,26 @@ func TestListAuthFiles_IncludesRecentRequestsBuckets(t *testing.T) {
 		t.Fatalf("expected failed number, got %#v", fileEntry["failed"])
 	}
 
-	quota, ok := fileEntry["quota"].(map[string]any)
+	if _, present := fileEntry["quota"]; present {
+		t.Fatalf("legacy quota key still served: %#v", fileEntry["quota"])
+	}
+	if _, present := fileEntry["model_quotas"]; present {
+		t.Fatalf("legacy model_quotas key still served: %#v", fileEntry["model_quotas"])
+	}
+	snapshot, ok := fileEntry["quota_snapshot"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected quota observation object, got %#v", fileEntry["quota"])
+		t.Fatalf("expected quota_snapshot object, got %#v", fileEntry["quota_snapshot"])
 	}
-	if _, ok := quota["observed_at"].(string); !ok {
-		t.Fatalf("expected quota observed_at string, got %#v", quota["observed_at"])
+	if _, ok := snapshot["updated_at"].(string); !ok {
+		t.Fatalf("expected quota_snapshot updated_at string, got %#v", snapshot["updated_at"])
 	}
-	quotaSignals, ok := quota["signals"].(map[string]any)
-	if !ok || quotaSignals["X-Codex-Primary-Used-Percent"] != "58" {
-		t.Fatalf("expected auth quota signals, got %#v", quota["signals"])
+	windows, ok := snapshot["windows"].([]any)
+	if !ok || len(windows) != 1 {
+		t.Fatalf("expected one quota window, got %#v", snapshot["windows"])
 	}
-
-	modelQuotas, ok := fileEntry["model_quotas"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected model_quotas object, got %#v", fileEntry["model_quotas"])
-	}
-	modelQuota, ok := modelQuotas["gpt-5"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected gpt-5 quota observation, got %#v", modelQuotas["gpt-5"])
-	}
-	modelSignals, ok := modelQuota["signals"].(map[string]any)
-	if !ok || modelSignals["Retry-After"] != "120" {
-		t.Fatalf("expected model quota signals, got %#v", modelQuota["signals"])
+	window, _ := windows[0].(map[string]any)
+	if window["id"] != "primary" || window["class"] != "codex:weekly" || window["used_percent"] != float64(58) {
+		t.Fatalf("unexpected quota window: %#v", window)
 	}
 
 	recentRaw, ok := fileEntry["recent_requests"].([]any)

@@ -98,28 +98,7 @@ func (s *DevinAuthService) CreateAuthRecord(ctx context.Context, token string) (
 		metadata["plan"] = plan
 	}
 
-	quotaSignals := make(map[string]string)
-	if plan != "" {
-		quotaSignals["plan"] = plan
-	}
-	if userStatus != nil {
-		quotaSignals["daily_quota_remaining_percent"] = fmt.Sprintf("%d%%", userStatus.DailyQuotaRemainingPercent)
-		quotaSignals["weekly_quota_remaining_percent"] = fmt.Sprintf("%d%%", userStatus.WeeklyQuotaRemainingPercent)
-		if !userStatus.DailyQuotaResetAt.IsZero() {
-			quotaSignals["daily_quota_reset_at"] = userStatus.DailyQuotaResetAt.Format(time.RFC3339)
-		}
-		if !userStatus.WeeklyQuotaResetAt.IsZero() {
-			quotaSignals["weekly_quota_reset_at"] = userStatus.WeeklyQuotaResetAt.Format(time.RFC3339)
-		}
-		if !userStatus.PlanStart.IsZero() {
-			quotaSignals["plan_start"] = userStatus.PlanStart.Format(time.RFC3339)
-		}
-		if !userStatus.PlanEnd.IsZero() {
-			quotaSignals["plan_end"] = userStatus.PlanEnd.Format(time.RFC3339)
-		}
-	}
-
-	return &coreauth.Auth{
+	record := &coreauth.Auth{
 		ID:         fileName,
 		Provider:   "devin",
 		FileName:   fileName,
@@ -127,6 +106,11 @@ func (s *DevinAuthService) CreateAuthRecord(ctx context.Context, token string) (
 		Status:     coreauth.StatusActive,
 		Attributes: attributes,
 		Metadata:   metadata,
-		Quota:      coreauth.QuotaState{ObservedAt: time.Now(), Signals: quotaSignals},
-	}, nil
+	}
+	if userStatus != nil {
+		record.QuotaSnapshot.Observe(coreauth.DevinStatusObservation(coreauth.SourceRefresh, plan,
+			userStatus.DailyQuotaRemainingPercent, userStatus.WeeklyQuotaRemainingPercent,
+			userStatus.DailyQuotaResetAt, userStatus.WeeklyQuotaResetAt, userStatus.PlanStart, userStatus.PlanEnd, time.Now()))
+	}
+	return record, nil
 }

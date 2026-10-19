@@ -2,9 +2,7 @@ package auth
 
 import (
 	"context"
-	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -17,11 +15,11 @@ const weeklyWindowMinutes = 7 * 24 * 60
 // soonest, so quota that would otherwise expire unused at the reset is consumed first.
 // Once that credential is exhausted it enters cooldown and the next-soonest one is used.
 //
-// Reset times come from the passive quota snapshot (Quota.Signals) captured from upstream
-// response headers. The requested model's own snapshot is preferred over the credential-wide
-// one, so a model-specific weekly window (Claude's Fable 7d_oi window) is honored. Credentials without a known future reset, either never observed or
-// with a reset that already passed, are picked first so a single request can learn their
-// current window. Ties fall back to ID order, which makes providers without quota
+// Reset times come from the credential's quota snapshot. A window scoped to the
+// requested model's family (Claude's Fable 7d_oi window) is preferred over the
+// credential-wide one. Credentials without a known future reset, either never observed
+// or with a reset that already passed, are picked first so a single request can learn
+// their current window. Ties fall back to ID order, which makes providers without quota
 // signals behave like fill-first.
 type SoonestResetSelector struct{}
 
@@ -49,52 +47,48 @@ func (s *SoonestResetSelector) Pick(ctx context.Context, provider, model string,
 	return picked, nil
 }
 
+// weeklyResetRank orders the windows that can stand in for the weekly reset:
+// a scoped weekly window first, then the credential-wide one, then the Codex
+// monthly window for accounts that expose the weekly limit as a longer primary.
+func weeklyResetRank(class WindowClass, scoped bool) int {
+	switch class {
+	case "claude:7d", "claude:7d_oi", "codex:weekly":
+		if scoped {
+			return 0
+		}
+		return 1
+	case "codex:monthly":
+		return 2
+	default:
+		return -1
+	}
+}
+
 // weeklyQuotaResetAt returns the observed weekly quota reset time for auth serving model,
-// or the zero time when no future reset is known. The model-scoped snapshot is checked
-// first and the credential-wide snapshot is the fallback.
+// or the zero time when no future reset is known.
 func weeklyQuotaResetAt(auth *Auth, model string, now time.Time) time.Time {
 	if auth == nil {
 		return time.Time{}
 	}
-	if state := existingModelState(auth, model); state != nil {
-		if resetAt := weeklyQuotaResetFromSnapshot(auth.Provider, state.Quota, true, now); !resetAt.IsZero() {
-			return resetAt
-		}
-	}
-	return weeklyQuotaResetFromSnapshot(auth.Provider, auth.Quota, false, now)
-}
-
-// weeklyQuotaResetFromSnapshot extracts the weekly reset time from one quota snapshot.
-// Model-specific windows are only read from model-scoped snapshots, because the
-// credential-wide snapshot may have been captured from a different model's response.
-func weeklyQuotaResetFromSnapshot(provider string, quota QuotaState, modelScoped bool, now time.Time) time.Time {
-	if len(quota.Signals) == 0 {
-		return time.Time{}
-	}
-	signal := func(name string) string {
-		return strings.TrimSpace(quota.Signals[http.CanonicalHeaderKey(name)])
-	}
+	provider := auth.QuotaSnapshot.Provider
+	scope := quotaScopeOf(provider, model)
+	bestRank := -1
 	var resetAt time.Time
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "claude":
-		if modelScoped {
-			resetAt = parseQuotaResetAt(signal("Anthropic-Ratelimit-Unified-7d_oi-Reset"), "", quota.ObservedAt)
+	for _, window := range auth.QuotaSnapshot.Windows {
+		if window.ModelScope != "" && window.ModelScope != scope {
+			continue
 		}
-		if resetAt.IsZero() {
-			resetAt = parseQuotaResetAt(signal("Anthropic-Ratelimit-Unified-7d-Reset"), "", quota.ObservedAt)
+		if !window.ResetAt.After(now) {
+			continue
 		}
-	case "codex":
-		// Codex reports the weekly limit as the secondary window. Accounts without a
-		// secondary window may expose the weekly limit as the primary one instead.
-		resetAt = parseQuotaResetAt(signal("X-Codex-Secondary-Reset-At"), signal("X-Codex-Secondary-Reset-After-Seconds"), quota.ObservedAt)
-		if resetAt.IsZero() {
-			if minutes, errParse := strconv.ParseInt(signal("X-Codex-Primary-Window-Minutes"), 10, 64); errParse == nil && minutes >= weeklyWindowMinutes {
-				resetAt = parseQuotaResetAt(signal("X-Codex-Primary-Reset-At"), signal("X-Codex-Primary-Reset-After-Seconds"), quota.ObservedAt)
-			}
+		rank := weeklyResetRank(window.Class(provider), window.ModelScope != "")
+		if rank < 0 {
+			continue
 		}
-	}
-	if !resetAt.After(now) {
-		return time.Time{}
+		if bestRank < 0 || rank < bestRank {
+			bestRank = rank
+			resetAt = window.ResetAt
+		}
 	}
 	return resetAt
 }

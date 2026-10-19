@@ -11,171 +11,272 @@ import {
   type LedgerCredential,
   type LedgerWindow,
 } from '../src/features/quota/ledgerModel';
+import type { QuotaSnapshot, QuotaWindow } from '../src/features/quota/snapshot/types';
 import type { AuthFileItem } from '../src/types';
 
 const NOW = Date.parse('2026-09-10T12:00:00Z');
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
-const unix = (ms: number) => String(Math.floor(ms / 1000));
 const iso = (ms: number) => new Date(ms).toISOString();
 
-const claudeFile = (extra: Partial<AuthFileItem> = {}): AuthFileItem => ({
+const snapWindow = (overrides: Partial<QuotaWindow>): QuotaWindow => ({
+  id: 'seven_day',
+  class: 'claude:7d',
+  used_percent: null,
+  limit_reached: false,
+  reset_at: null,
+  period_seconds: 604800,
+  section: 'headers',
+  source: 'headers',
+  observed_at: iso(NOW - HOUR),
+  ...overrides,
+});
+
+const snapshot = (
+  provider: QuotaSnapshot['provider'],
+  windows: QuotaWindow[],
+  extras: QuotaSnapshot['extras'] = null
+): QuotaSnapshot => ({
+  provider,
+  windows,
+  extras,
+  last_poll: null,
+  updated_at: iso(NOW - HOUR),
+});
+
+const planSection = (value: string) => ({
+  status: 'ok' as const,
+  value,
+  value_at: iso(NOW - HOUR),
+  checked_at: iso(NOW - HOUR),
+});
+
+const absent = { status: 'absent' as const, value: null, value_at: null, checked_at: null };
+
+const claudeFile = (quotaSnapshot?: QuotaSnapshot): AuthFileItem => ({
   name: 'claude-tom@example.dev.json',
   type: 'claude',
-  ...extra,
+  quota_snapshot: quotaSnapshot,
 });
 
 describe('observed Claude quota', () => {
-  test('reads utilization and resets from the recorded headers', () => {
-    const file = claudeFile({
-      quota: {
-        observed_at: iso(NOW - HOUR),
-        signals: {
-          'Anthropic-Ratelimit-Unified-5h-Utilization': '0.25',
-          'Anthropic-Ratelimit-Unified-5h-Reset': unix(NOW + 2 * HOUR),
-          'Anthropic-Ratelimit-Unified-7d-Utilization': '0.6',
-          'Anthropic-Ratelimit-Unified-7d-Reset': unix(NOW + 3 * DAY),
-        },
-      },
-    });
+  test('reads used percents and resets from the snapshot', () => {
+    const file = claudeFile(
+      snapshot('claude', [
+        snapWindow({
+          id: 'five_hour',
+          class: 'claude:5h',
+          used_percent: 25,
+          reset_at: iso(NOW + 2 * HOUR),
+          period_seconds: 18000,
+        }),
+        snapWindow({
+          used_percent: 60,
+          reset_at: iso(NOW + 3 * DAY),
+          observed_at: iso(NOW - 2 * HOUR),
+        }),
+      ])
+    );
 
     const data = observedLedgerData('claude', file, NOW);
     expect(data?.source).toBe('observed');
     expect(data?.observedAtMs).toBe(NOW - HOUR);
-    expect(data?.windows.map((w) => [w.id, w.remaining, w.resetAtMs])).toEqual([
-      ['five-hour', 75, Math.floor((NOW + 2 * HOUR) / 1000) * 1000],
-      ['seven-day', 40, Math.floor((NOW + 3 * DAY) / 1000) * 1000],
+    expect(data?.windows.map((w) => [w.id, w.remaining, w.resetAtMs, w.periodHours])).toEqual([
+      ['five_hour', 75, NOW + 2 * HOUR, 5],
+      ['seven_day', 40, NOW + 3 * DAY, 168],
     ]);
   });
 
-  test('takes the Fable window from a model-scoped snapshot', () => {
-    const file = claudeFile({
-      quota: {
-        observed_at: iso(NOW - HOUR),
-        signals: { 'Anthropic-Ratelimit-Unified-7d-Utilization': '0.1' },
-      },
-      model_quotas: {
-        'claude-fable-5': {
-          observed_at: iso(NOW - 2 * HOUR),
-          signals: {
-            'Anthropic-Ratelimit-Unified-7d_oi-Utilization': '0.42',
-            'Anthropic-Ratelimit-Unified-7d_oi-Reset': unix(NOW + DAY),
-          },
-        },
-      },
-    });
-
-    const fable = observedLedgerData('claude', file, NOW)?.windows.find(
-      (w) => w.id === 'seven-day-fable'
+  test('labels the Fable-scoped window and reads the plan from extras', () => {
+    const file = claudeFile(
+      snapshot(
+        'claude',
+        [
+          snapWindow({
+            id: 'seven_day_fable',
+            class: 'claude:7d_oi',
+            model_scope: 'fable',
+            used_percent: 42,
+            reset_at: iso(NOW + DAY),
+          }),
+        ],
+        { kind: 'claude', plan: planSection('plan_max'), extra_usage: absent }
+      )
     );
-    expect(fable?.remaining).toBe(58);
-    expect(fable?.labelKey).toBe('claude_quota.seven_day_fable');
+
+    const data = observedLedgerData('claude', file, NOW);
+    expect(data?.planType).toBe('plan_max');
+    expect(data?.windows[0].remaining).toBe(58);
+    expect(data?.windows[0].labelKey).toBe('claude_quota.seven_day_fable');
   });
 
   test('treats a window that reset after observation as full', () => {
-    const file = claudeFile({
-      quota: {
-        observed_at: iso(NOW - 6 * HOUR),
-        signals: {
-          'Anthropic-Ratelimit-Unified-5h-Utilization': '1',
-          'Anthropic-Ratelimit-Unified-5h-Reset': unix(NOW - HOUR),
-        },
-      },
-    });
+    const file = claudeFile(
+      snapshot('claude', [
+        snapWindow({
+          id: 'five_hour',
+          used_percent: 100,
+          limit_reached: true,
+          reset_at: iso(NOW - HOUR),
+        }),
+      ])
+    );
 
     const [window] = observedLedgerData('claude', file, NOW)?.windows ?? [];
     expect(window.remaining).toBe(100);
     expect(window.resetAtMs).toBeNull();
+    expect(window.limitReached).toBe(false);
   });
 
-  test('returns null without recorded signals', () => {
+  test('returns null without a snapshot or without windows', () => {
     expect(observedLedgerData('claude', claudeFile(), NOW)).toBeNull();
-    expect(
-      observedLedgerData(
-        'claude',
-        claudeFile({ quota: { observed_at: iso(NOW), signals: {} } }),
-        NOW
-      )
-    ).toBeNull();
+    expect(observedLedgerData('claude', claudeFile(snapshot('claude', [])), NOW)).toBeNull();
+    expect(observedLedgerData('claude', claudeFile(snapshot('', [])), NOW)).toBeNull();
   });
 });
 
 describe('observed Codex quota', () => {
-  test('reads both windows, relative resets, and the plan', () => {
+  test('reads both windows by class and the plan', () => {
     const file: AuthFileItem = {
       name: 'codex-a@example.com.json',
       type: 'codex',
-      quota: {
-        observed_at: iso(NOW - HOUR),
-        signals: {
-          'X-Codex-Plan-Type': 'Pro',
-          'X-Codex-Primary-Used-Percent': '20',
-          'X-Codex-Primary-Window-Minutes': '300',
-          'X-Codex-Primary-Reset-After-Seconds': '7200',
-          'X-Codex-Secondary-Used-Percent': '83',
-          'X-Codex-Secondary-Window-Minutes': '10080',
-          'X-Codex-Secondary-Reset-At': unix(NOW + 2 * DAY),
-        },
-      },
+      quota_snapshot: snapshot(
+        'codex',
+        [
+          snapWindow({
+            id: 'primary',
+            class: 'codex:5h',
+            used_percent: 20,
+            reset_at: iso(NOW + HOUR),
+            period_seconds: 18000,
+            section: 'codex.usage',
+          }),
+          snapWindow({
+            id: 'secondary',
+            class: 'codex:weekly',
+            used_percent: 83,
+            reset_at: iso(NOW + 2 * DAY),
+            section: 'codex.usage',
+          }),
+        ],
+        {
+          kind: 'codex',
+          plan: planSection('Pro'),
+          access: absent,
+          credits: absent,
+          subscription: absent,
+          reset_credits: absent,
+        }
+      ),
     };
 
     const data = observedLedgerData('codex', file, NOW);
     expect(data?.planType).toBe('pro');
-    expect(data?.windows.map((w) => [w.id, w.remaining, w.resetAtMs])).toEqual([
-      ['five-hour', 80, NOW + HOUR],
-      ['weekly', 17, Math.floor((NOW + 2 * DAY) / 1000) * 1000],
+    expect(data?.windows.map((w) => [w.id, w.labelKey, w.remaining, w.resetAtMs])).toEqual([
+      ['primary', 'codex_quota.primary_window', 80, NOW + HOUR],
+      ['secondary', 'codex_quota.secondary_window', 17, NOW + 2 * DAY],
     ]);
+    expect(weeklyWindow(data?.windows ?? [])?.id).toBe('secondary');
+  });
+});
+
+describe('codex weekly summary', () => {
+  test('finds the weekly window by class, not by period', () => {
+    const file: AuthFileItem = {
+      name: 'codex-w@example.com.json',
+      type: 'codex',
+      quota_snapshot: snapshot(
+        'codex',
+        [
+          snapWindow({
+            id: 'additional.primary',
+            class: '',
+            used_percent: 10,
+            reset_at: iso(NOW + 3 * HOUR),
+            period_seconds: 604800,
+            section: 'codex.usage',
+          }),
+          snapWindow({
+            id: 'secondary',
+            class: 'codex:weekly',
+            used_percent: 40,
+            reset_at: iso(NOW + 2 * DAY),
+            period_seconds: null,
+            section: 'codex.usage',
+          }),
+        ],
+        {
+          kind: 'codex',
+          plan: planSection('Pro'),
+          access: absent,
+          credits: absent,
+          subscription: absent,
+          reset_credits: absent,
+        }
+      ),
+    };
+    const row = observedLedgerData('codex', file, NOW);
+    const summary = summarizeProvider(
+      'codex',
+      [{ ...credential('w', []), provider: 'codex', row: row! }],
+      NOW
+    );
+    expect(summary.soonestWeeklyResetMs).toBe(NOW + 2 * DAY);
   });
 });
 
 describe('observed xAI quota', () => {
-  const xaiFile = (signals: Record<string, string>): AuthFileItem => ({
-    name: 'xai-a@example.com.json',
-    type: 'xai',
-    quota: { observed_at: iso(NOW - HOUR), signals },
-  });
-
-  test('reads the polled billing window', () => {
-    const data = observedLedgerData(
-      'xai',
-      xaiFile({
-        'X-Xai-Billing-Period-Type': 'weekly',
-        'X-Xai-Billing-Used-Percent': '37.5',
-        'X-Xai-Billing-Reset-At': unix(NOW + 2 * DAY),
-        'X-Xai-Billing-Window-Minutes': '10080',
-      }),
-      NOW
-    );
+  test('reads the weekly and monthly windows', () => {
+    const file: AuthFileItem = {
+      name: 'xai-a@example.com.json',
+      type: 'xai',
+      quota_snapshot: snapshot('xai', [
+        snapWindow({
+          id: 'weekly',
+          class: 'xai:weekly',
+          used_percent: 37.5,
+          reset_at: iso(NOW + 2 * DAY),
+          section: 'xai.weekly',
+        }),
+        snapWindow({
+          id: 'monthly',
+          class: 'xai:monthly',
+          used_percent: 90,
+          reset_at: iso(NOW + 20 * DAY),
+          period_seconds: 30 * 86400,
+          section: 'xai.monthly',
+        }),
+      ]),
+    };
+    const data = observedLedgerData('xai', file, NOW);
     expect(data?.source).toBe('observed');
-    expect(data?.observedAtMs).toBe(NOW - HOUR);
     expect(data?.windows).toEqual([
       {
-        id: 'xai-weekly',
+        id: 'weekly',
+        class: 'xai:weekly',
         labelKey: 'quota_management.ledger_window_weekly',
         remaining: 62.5,
-        resetAtMs: Math.floor((NOW + 2 * DAY) / 1000) * 1000,
+        resetAtMs: NOW + 2 * DAY,
         periodHours: 168,
+        limitReached: false,
+        staleSinceMs: null,
+      },
+      {
+        id: 'monthly',
+        class: 'xai:monthly',
+        labelKey: 'quota_management.ledger_window_monthly',
+        remaining: 10,
+        resetAtMs: NOW + 20 * DAY,
+        periodHours: 720,
+        limitReached: false,
+        staleSinceMs: null,
       },
     ]);
-  });
-
-  test('defaults to the monthly period and ignores snapshots without billing signals', () => {
-    const [window] =
-      observedLedgerData('xai', xaiFile({ 'X-Xai-Billing-Used-Percent': '90' }), NOW)?.windows ??
-      [];
-    expect(window.id).toBe('xai-monthly');
-    expect(window.remaining).toBe(10);
-    expect(observedLedgerData('xai', xaiFile({ 'Retry-After': '60' }), NOW)).toBeNull();
   });
 });
 
 describe('resolveLedgerRow', () => {
-  const file = claudeFile({
-    quota: {
-      observed_at: iso(NOW - HOUR),
-      signals: { 'Anthropic-Ratelimit-Unified-7d-Utilization': '0.5' },
-    },
-  });
+  const file = claudeFile(snapshot('claude', [snapWindow({ used_percent: 50 })]));
 
   test('prefers a loaded live reading over the observed snapshot', () => {
     const row = resolveLedgerRow(
@@ -200,35 +301,48 @@ describe('resolveLedgerRow', () => {
     expect(resolveLedgerRow('claude', file, undefined, NOW).windows[0].remaining).toBe(50);
   });
 
-  test('overlays an observed snapshot recorded after the live fetch', () => {
-    const live = {
-      status: 'success',
-      planType: 'plan_max',
-      fetchedAtMs: NOW - 2 * HOUR,
-      windows: [
-        { id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 },
-        { id: 'seven-day-opus', usedPercent: 30, resetAtMs: NOW + DAY, periodHours: 168 },
-      ],
-    };
-    const row = resolveLedgerRow('claude', file, live, NOW);
-    expect(row.source).toBe('observed');
-    expect(row.observedAtMs).toBe(NOW - HOUR);
-    expect(row.planType).toBe('plan_max');
-    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([
-      ['seven-day', 50],
-      ['seven-day-opus', 70],
-    ]);
+  const liveTwoWindows = (fetchedAtMs: number) => ({
+    status: 'success',
+    planType: 'plan_max',
+    fetchedAtMs,
+    windows: [
+      { id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 },
+      { id: 'seven-day-opus', usedPercent: 30, resetAtMs: NOW + DAY, periodHours: 168 },
+    ],
   });
 
-  test('keeps a live reading fetched after the observed snapshot', () => {
-    const live = {
-      status: 'success',
-      fetchedAtMs: NOW - 30 * 60 * 1000,
-      windows: [{ id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 }],
-    };
-    const row = resolveLedgerRow('claude', file, live, NOW);
+  const newerSnapshotFile = claudeFile({
+    ...snapshot('claude', [snapWindow({ used_percent: 50, observed_at: iso(NOW - 3 * HOUR) })], {
+      kind: 'claude',
+      plan: planSection('plan_pro'),
+      extra_usage: absent,
+    }),
+    updated_at: iso(NOW - HOUR),
+  });
+
+  test('a snapshot updated after the live fetch replaces the whole live reading', () => {
+    const leaked = resolveLedgerRow('claude', file, liveTwoWindows(NOW - 2 * HOUR), NOW);
+    expect(leaked.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
+
+    const row = resolveLedgerRow('claude', newerSnapshotFile, liveTwoWindows(NOW - 2 * HOUR), NOW);
+    expect(row.source).toBe('observed');
+    expect(row.planType).toBe('plan_pro');
+    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
+  });
+
+  test('a live reading fetched after the snapshot update replaces the whole snapshot', () => {
+    const row = resolveLedgerRow(
+      'claude',
+      newerSnapshotFile,
+      liveTwoWindows(NOW - 30 * 60 * 1000),
+      NOW
+    );
     expect(row.source).toBe('live');
-    expect(row.windows[0].remaining).toBe(90);
+    expect(row.planType).toBe('plan_max');
+    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([
+      ['seven-day', 90],
+      ['seven-day-opus', 70],
+    ]);
   });
 
   test('reports nothing for providers without data', () => {

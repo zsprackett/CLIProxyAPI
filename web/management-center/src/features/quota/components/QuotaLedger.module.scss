@@ -185,6 +185,18 @@
   background: transparent;
 }
 
+.windowLimit {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--viz-failure);
+}
+
+.windowStale {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: help;
+}
+
 .windowReset {
   font-size: 12px;
   color: var(--text-tertiary);

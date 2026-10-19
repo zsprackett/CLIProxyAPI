@@ -1,0 +1,59 @@
+{
+  "provider": "claude",
+  "windows": [
+    {
+      "id": "five_hour",
+      "class": "claude:5h",
+      "used_percent": 25,
+      "limit_reached": false,
+      "reset_at": "2026-10-19T20:00:00Z",
+      "period_seconds": 18000,
+      "section": "headers",
+      "source": "headers",
+      "observed_at": "2026-10-19T17:30:00Z"
+    },
+    {
+      "id": "seven_day",
+      "class": "claude:7d",
+      "used_percent": 60.5,
+      "limit_reached": false,
+      "reset_at": "2026-10-22T08:00:00Z",
+      "period_seconds": 604800,
+      "section": "claude.usage",
+      "source": "poll",
+      "observed_at": "2026-10-19T17:00:00Z"
+    },
+    {
+      "id": "seven_day_fable",
+      "class": "claude:7d_oi",
+      "model_scope": "fable",
+      "used_percent": null,
+      "limit_reached": false,
+      "reset_at": "2026-10-21T00:00:00Z",
+      "period_seconds": 604800,
+      "section": "headers",
+      "source": "headers",
+      "observed_at": "2026-10-19T16:00:00Z"
+    }
+  ],
+  "extras": {
+    "kind": "claude",
+    "plan": {
+      "status": "ok",
+      "value": "plan_max",
+      "value_at": "2026-10-19T17:00:00Z",
+      "checked_at": "2026-10-19T17:00:00Z"
+    },
+    "extra_usage": {
+      "status": "absent",
+      "value": null,
+      "value_at": null,
+      "checked_at": null
+    }
+  },
+  "last_poll": {
+    "at": "2026-10-19T17:00:00Z",
+    "trigger": "background"
+  },
+  "updated_at": "2026-10-19T17:30:00Z"
+}

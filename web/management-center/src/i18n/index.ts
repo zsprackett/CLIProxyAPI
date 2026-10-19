@@ -1,5 +1,5 @@
 /**
- * i18next 国际化配置
+ * i18next configuration
  */
 
 import i18n from 'i18next';
@@ -20,11 +20,27 @@ i18n.use(initReactI18next).init({
   lng: getInitialLanguage(),
   fallbackLng: 'zh-CN',
   interpolation: {
-    escapeValue: false, // React 已经转义
+    escapeValue: false, // React already escapes
   },
   react: {
     useSuspense: false,
   },
+});
+
+const PERIOD_UNITS = [
+  [86400, 'day'],
+  [3600, 'hour'],
+  [60, 'minute'],
+] as const;
+
+/** `{{seconds, period}}`: a window length in whole days, hours, or minutes. */
+i18n.services.formatter?.add('period', (value: unknown, lng: string | undefined) => {
+  const seconds = Number(value);
+  const [size, unit] =
+    PERIOD_UNITS.find(([unitSeconds]) => seconds % unitSeconds === 0) ?? PERIOD_UNITS[2];
+  return new Intl.NumberFormat(lng, { style: 'unit', unit, unitDisplay: 'long' }).format(
+    Math.round(seconds / size)
+  );
 });
 
 export default i18n;

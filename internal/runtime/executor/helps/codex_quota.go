@@ -21,10 +21,9 @@ const (
 //
 // The websocket payload identifies each additional limit only by limit name
 // ("GPT-5.3-Codex-Spark"), while HTTP responses namespace the same limit by a
-// short name (x-codex-bengalfox-*). The two forms therefore cannot produce
-// identical header names; the X-Codex-Additional- prefix marks the websocket
-// origin, and the snapshot-replacement semantics in QuotaState keep the two
-// spellings from accumulating side by side.
+// short name (x-codex-bengalfox-*). Both forms carry the limit name in a
+// -Limit-Name header, which the snapshot header parser keys the window on, so
+// the two spellings land on one window id.
 func ParseCodexQuotaEventHeaders(payload []byte) http.Header {
 	if len(payload) == 0 {
 		return nil

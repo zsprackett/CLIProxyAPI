@@ -1,49 +1,18 @@
 package auth
 
 import (
-	"net/http"
-	"strings"
 	"time"
 )
 
-// pollShowsQuotaCapacity reports whether a polled quota snapshot proves the
-// account has room again. Only providers whose full set of windows is reported
-// by the poll can prove it; a window that is missing counts as unknown.
-func pollShowsQuotaCapacity(provider string, polled QuotaState) bool {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	windows := quotaWindowsFromSnapshot(provider, polled, false)
-	signal := func(name string) string {
-		return strings.TrimSpace(polled.Signals[http.CanonicalHeaderKey(name)])
-	}
-	switch provider {
-	case "claude":
-		seen := make(map[string]bool, 2)
-		for _, window := range windows {
-			if window.Class != "claude:5h" && window.Class != "claude:7d" {
-				continue
-			}
-			if window.UsedPercent >= 100 {
-				return false
-			}
-			seen[window.Class] = true
-		}
-		return seen["claude:5h"] && seen["claude:7d"]
-	case "codex":
-		if len(windows) == 0 {
-			return false
-		}
-		for _, window := range windows {
-			if window.UsedPercent >= 100 {
-				return false
-			}
-		}
-		if strings.EqualFold(signal("X-Codex-Limit-Reached"), "true") {
-			return false
-		}
-		return !strings.EqualFold(signal("X-Codex-Allowed"), "false")
-	default:
+// pollShowsQuotaCapacity reports whether a polled observation proves the
+// account has room again. The rule is the provider's showsCapacity row,
+// evaluated on the poll result alone, never on the merged snapshot.
+func pollShowsQuotaCapacity(obs QuotaObservation) bool {
+	row, ok := quotaProviders[obs.Provider]
+	if !ok || row.showsCapacity == nil {
 		return false
 	}
+	return row.showsCapacity(obs)
 }
 
 // hasActiveQuotaCooldown reports whether the auth, or any of its model states,

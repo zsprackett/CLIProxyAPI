@@ -56,6 +56,7 @@ import {
   buildTabCounts,
   canRefreshQuotaAfterList,
   classifyQuotaFiles,
+  countQuotaCredentials,
   filterEntriesByTab,
   filterEntriesBySearch,
   paginate,
@@ -63,6 +64,7 @@ import {
   type QuotaFileEntry,
 } from './logic';
 import { nextRecoveryMs } from './resetSchedule';
+import { readQuotaSnapshot } from './snapshot/windows';
 import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from './providers';
 import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
@@ -214,7 +216,13 @@ export function QuotaPage() {
   }, []);
 
   const resolveNextRecovery = useCallback(
-    (entry: QuotaFileEntry) => nextRecoveryMs(entry.type, getQuota(entry), sortNow),
+    (entry: QuotaFileEntry) =>
+      nextRecoveryMs(
+        entry.type,
+        getQuota(entry),
+        sortNow,
+        readQuotaSnapshot(entry.type, entry.file.quota_snapshot)
+      ),
     [getQuota, sortNow]
   );
   // 排序在分页之前：否则「最快恢复」只在当前页内成立。
@@ -351,16 +359,14 @@ export function QuotaPage() {
     [showIdentities]
   );
 
-  const { loadedCount, attentionCount } = useMemo(() => {
-    let loaded = 0;
-    let attention = 0;
-    entries.forEach((entry) => {
-      const status = quotaByType[entry.type][getQuotaCacheKey(entry.file)]?.status;
-      if (status === 'success') loaded += 1;
-      else if (status === 'error') attention += 1;
-    });
-    return { loadedCount: loaded, attentionCount: attention };
-  }, [entries, quotaByType]);
+  const { loadedCount, attentionCount } = useMemo(
+    () =>
+      countQuotaCredentials(
+        entries,
+        (entry) => quotaByType[entry.type][getQuotaCacheKey(entry.file)]?.status
+      ),
+    [entries, quotaByType]
+  );
 
   // 剪枝：文件列表落定后，各 provider 缓存只保留仍存在的凭证
   useEffect(() => {

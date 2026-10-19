@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	log "github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 )
 
 type recordingCooldownStateStore struct {
@@ -170,6 +173,62 @@ func TestFileCooldownStateStore_SaveLoadAndCleanStale(t *testing.T) {
 	}
 	if _, errStat := os.Stat(filepath.Join(authDir, "xai.cds")); !errors.Is(errStat, os.ErrNotExist) {
 		t.Fatalf("expected xai.cds to be removed, stat error = %v", errStat)
+	}
+}
+
+func TestRestoreSkipsMalformedSnapshotRecordsAndWarns(t *testing.T) {
+	authDir := t.TempDir()
+	observedAt := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	cds := func(authID, snapshot string) string {
+		return `{"version":1,"auth_id":"` + authID + `","provider":"claude","records":[{"provider":"claude","auth_id":"` + authID +
+			`","status":"observed","snapshot":` + snapshot + `,"updated_at":"` + observedAt + `"}]}` + "\n"
+	}
+	window := `{"id":"five_hour","class":"claude:5h","used_percent":%s,"limit_reached":false,"reset_at":null,"period_seconds":18000,"section":"headers","source":"headers","observed_at":"` + observedAt + `"}`
+	files := map[string]string{
+		"good.cds":        cds("good", `{"provider":"claude","windows":[`+fmt.Sprintf(window, "25")+`],"extras":{"kind":"claude","plan":{"status":"ok","value":"plan_max","value_at":"`+observedAt+`","checked_at":"`+observedAt+`"}},"last_poll":null,"updated_at":"`+observedAt+`"}`),
+		"bad-kind.cds":    cds("bad-kind", `{"provider":"claude","windows":[`+fmt.Sprintf(window, "25")+`],"extras":{"kind":"nope"},"last_poll":null,"updated_at":"`+observedAt+`"}`),
+		"bad-percent.cds": cds("bad-percent", `{"provider":"claude","windows":[`+fmt.Sprintf(window, `"abc"`)+`],"extras":null,"last_poll":null,"updated_at":"`+observedAt+`"}`),
+	}
+	for name, body := range files {
+		if errWrite := os.WriteFile(filepath.Join(authDir, name), []byte(body), 0o600); errWrite != nil {
+			t.Fatalf("write %s: %v", name, errWrite)
+		}
+	}
+	hook := logtest.NewGlobal()
+	defer hook.Reset()
+
+	manager := NewManager(nil, nil, nil)
+	manager.SetCooldownStateStore(NewFileCooldownStateStoreWithAuthDir(authDir, authDir))
+	for _, id := range []string{"good", "bad-kind", "bad-percent"} {
+		if _, errRegister := manager.Register(WithSkipPersist(context.Background()), &Auth{ID: id, Provider: "claude", Status: StatusActive}); errRegister != nil {
+			t.Fatalf("Register(%s): %v", id, errRegister)
+		}
+	}
+	if errRestore := manager.RestoreCooldownStates(context.Background()); errRestore != nil {
+		t.Fatalf("one malformed snapshot must not fail the restore: %v", errRestore)
+	}
+	good, _ := manager.GetByID("good")
+	if w, ok := snapshotWindow(good.QuotaSnapshot, "five_hour", ""); !ok {
+		t.Fatalf("good credential did not restore: %+v", good.QuotaSnapshot)
+	} else if used, _ := w.Used.Get(); used != 25 {
+		t.Fatalf("good credential five_hour = %+v, want 25", w)
+	}
+	for _, id := range []string{"bad-kind", "bad-percent"} {
+		auth, _ := manager.GetByID(id)
+		if len(auth.QuotaSnapshot.Windows) != 0 {
+			t.Fatalf("%s restored windows from a malformed snapshot: %+v", id, auth.QuotaSnapshot)
+		}
+	}
+	warned := map[string]bool{}
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == log.WarnLevel {
+			if id, _ := entry.Data["auth_id"].(string); id != "" {
+				warned[id] = true
+			}
+		}
+	}
+	if !warned["bad-kind"] || !warned["bad-percent"] {
+		t.Fatalf("expected one warning per malformed snapshot, got %v", warned)
 	}
 }
 

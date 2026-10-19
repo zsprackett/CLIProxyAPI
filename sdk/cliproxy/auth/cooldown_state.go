@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // CooldownStateRecord is a persisted runtime cooldown snapshot for one auth/model pair.
@@ -25,14 +28,100 @@ type CooldownStateRecord struct {
 	NextRetryAfter time.Time  `json:"next_retry_after"`
 	Reason         string     `json:"reason,omitempty"`
 	Quota          QuotaState `json:"quota,omitempty"`
-	LastError      *Error     `json:"last_error,omitempty"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// Snapshot is the credential's quota snapshot, on the auth-level record only.
+	Snapshot  *QuotaSnapshot `json:"snapshot,omitempty"`
+	LastError *Error         `json:"last_error,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	// legacySignals holds the pre-snapshot quota.signals of a record written by
+	// an older release. Restore converts them once; the decoder goes away after
+	// one release.
+	legacySignals    map[string]string
+	legacyObservedAt time.Time
 }
 
-// cooldownStateStatusObserved marks a record that carries only a passive quota
-// observation (Quota.ObservedAt and Quota.Signals) and no active cooldown. Saving
-// observations lets quota-aware routing and the management quota view keep their
-// data across restarts instead of relearning it from live traffic.
+// UnmarshalJSON also reads the legacy quota.signals form, which QuotaState no
+// longer declares. A snapshot that does not decode is dropped with a warning,
+// so one bad record cannot block the restore of every credential.
+func (r *CooldownStateRecord) UnmarshalJSON(data []byte) error {
+	type plain CooldownStateRecord
+	var record struct {
+		plain
+		Snapshot json.RawMessage `json:"snapshot"`
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		return err
+	}
+	var legacy struct {
+		Quota struct {
+			ObservedAt time.Time         `json:"observed_at"`
+			Signals    map[string]string `json:"signals"`
+		} `json:"quota"`
+	}
+	if err := json.Unmarshal(data, &legacy); err == nil {
+		record.legacySignals = legacy.Quota.Signals
+		record.legacyObservedAt = legacy.Quota.ObservedAt
+	}
+	record.plain.Snapshot = nil
+	if len(record.Snapshot) > 0 && string(record.Snapshot) != "null" {
+		var snapshot QuotaSnapshot
+		if err := json.Unmarshal(record.Snapshot, &snapshot); err != nil {
+			log.WithFields(log.Fields{"auth_id": record.AuthID, "provider": record.Provider}).
+				Warnf("cooldown state: dropping quota snapshot that does not decode: %v", err)
+		} else {
+			record.plain.Snapshot = &snapshot
+		}
+	}
+	*r = CooldownStateRecord(record.plain)
+	return nil
+}
+
+// legacyQuotaObservation converts a legacy record into one observation. Claude,
+// Codex, and xAI signals are canonical header names; a model-scoped record
+// passes its model so Claude's 7d_oi becomes a scoped window. Devin keys go
+// through devinLegacySignals. Legacy data is Source headers, so the first poll
+// overrides it.
+func legacyQuotaObservation(kind ProviderKind, record CooldownStateRecord, now time.Time) (QuotaObservation, bool) {
+	if len(record.legacySignals) == 0 || record.legacyObservedAt.IsZero() || now.Sub(record.legacyObservedAt) > quotaObservationRetention {
+		return QuotaObservation{}, false
+	}
+	headers := make(http.Header, len(record.legacySignals))
+	for key, value := range record.legacySignals {
+		headers.Set(key, value)
+	}
+	model := strings.TrimSpace(record.Model)
+	observedAt := record.legacyObservedAt
+	switch kind {
+	case ProviderClaude:
+		return claudeHeadersObservation(headers, model, observedAt)
+	case ProviderCodex:
+		return codexHeadersObservation(headers, model, observedAt)
+	case ProviderXAI:
+		obs, ok := xaiBillingHeadersObservation(headers, observedAt)
+		if !ok {
+			return QuotaObservation{}, false
+		}
+		obs.Source = SourceHeaders
+		obs.Sections = nil
+		for i := range obs.Windows {
+			obs.Windows[i].Source = SourceHeaders
+		}
+		return obs, true
+	case ProviderDevin:
+		obs, ok := devinLegacySignals(record.legacySignals, observedAt)
+		if !ok {
+			return QuotaObservation{}, false
+		}
+		obs.Sections = nil
+		return obs, true
+	default:
+		return QuotaObservation{}, false
+	}
+}
+
+// cooldownStateStatusObserved marks a record that carries only a quota snapshot
+// and no active cooldown. Saving snapshots lets quota-aware routing and the
+// management quota view keep their data across restarts instead of relearning
+// it from live traffic.
 const cooldownStateStatusObserved = "observed"
 
 // quotaObservationRetention bounds how long a saved observation stays useful.

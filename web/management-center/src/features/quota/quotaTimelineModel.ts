@@ -12,6 +12,14 @@
 
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
+import type { QuotaSnapshot } from './snapshot/types';
+import {
+  isCapacityWindow,
+  newerQuotaReading,
+  quotaWindowLabel,
+  remainingFromUsed,
+  snapshotWindowRemaining,
+} from './snapshot/windows';
 
 export { DAY_MS, HOUR_MS };
 
@@ -29,6 +37,9 @@ const SESSION_PERIOD_HOURS = 5;
 /** A limit summarized in the lane's left column. */
 export interface TimelineLimit {
   label: string;
+  /** i18n key that names the limit; preferred over `label` when set. */
+  labelKey?: string;
+  labelParams?: Record<string, string | number>;
   /** Remaining percent, 0..100. */
   remaining: number;
 }
@@ -320,6 +331,8 @@ export interface TimelineLaneInput {
   displayName: string;
   provider: QuotaProviderType;
   quota: { status?: string } | undefined;
+  /** The backend quota snapshot; drawn when it is the newer reading. */
+  snapshot?: QuotaSnapshot | null;
   /**
    * Longest window period worth drawing, in hours — normally the visible span.
    * A window longer than the whole view can't show a boundary, and a much
@@ -329,6 +342,67 @@ export interface TimelineLaneInput {
 }
 
 const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
+
+/** A lane from the backend snapshot, when it is the newer reading. */
+function snapshotLane(
+  empty: TimelineLane,
+  snapshot: QuotaSnapshot,
+  maxPeriodHours?: number
+): TimelineLane {
+  const provider = snapshot.provider;
+  if (!provider || provider !== empty.provider) return empty;
+
+  const windows = snapshot.windows.map((window) => {
+    const resetAtMs = Date.parse(window.reset_at ?? '');
+    return {
+      window,
+      resetAtMs: Number.isFinite(resetAtMs) ? resetAtMs : null,
+      periodHours:
+        typeof window.period_seconds === 'number' && window.period_seconds > 0
+          ? window.period_seconds / 3600
+          : null,
+      remaining: snapshotWindowRemaining(window),
+    };
+  });
+  const candidates = windows.filter(
+    (entry) => entry.resetAtMs !== null && isCapacityWindow(entry.window)
+  );
+  // Same rule as the live Codex lane: stay on the account window, not a
+  // model-scoped one with the same period.
+  const preferredCodexClass =
+    maxPeriodHours !== undefined && maxPeriodHours <= SESSION_PERIOD_HOURS
+      ? 'codex:5h'
+      : 'codex:weekly';
+  const preferred =
+    provider === 'codex'
+      ? candidates.find(
+          (entry) =>
+            entry.window.class === preferredCodexClass &&
+            entry.periodHours !== null &&
+            (maxPeriodHours === undefined || entry.periodHours <= maxPeriodHours)
+        )
+      : undefined;
+  const chosen = preferred ?? pickLaneWindow(candidates, maxPeriodHours);
+  if (!chosen) return empty;
+
+  return {
+    ...empty,
+    anchorMs: chosen.resetAtMs,
+    periodHours: chosen.periodHours,
+    remaining: chosen.remaining,
+    limits: windows
+      .filter((entry) => entry.remaining !== null)
+      .map((entry) => {
+        const label = quotaWindowLabel(provider, entry.window);
+        return {
+          label: label.label ?? entry.window.id,
+          labelKey: label.labelKey,
+          labelParams: label.labelParams,
+          remaining: entry.remaining as number,
+        };
+      }),
+  };
+}
 
 /**
  * Build a lane for one credential.
@@ -343,7 +417,7 @@ const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
  * scheduled", which is the truth.
  */
 export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
-  const { name, displayName, provider, quota, maxPeriodHours } = input;
+  const { name, displayName, provider, quota, snapshot, maxPeriodHours } = input;
   const empty: TimelineLane = {
     name,
     displayName,
@@ -355,7 +429,9 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     resetCredits: [],
   };
 
-  if (!quota || quota.status !== 'success') return empty;
+  const reading = newerQuotaReading(quota, snapshot?.provider === provider ? snapshot : null);
+  if (reading === 'snapshot' && snapshot) return snapshotLane(empty, snapshot, maxPeriodHours);
+  if (reading !== 'live' || !quota) return empty;
 
   if (provider === 'claude' || provider === 'codex') {
     const windows = ((quota as { windows?: WindowLike[] }).windows ?? []).filter(
@@ -405,14 +481,13 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
       // Claude and Codex store percent USED.
-      remaining:
-        typeof chosen.usedPercent === 'number' ? clampPercent(100 - chosen.usedPercent) : null,
+      remaining: remainingFromUsed(chosen.usedPercent),
       limits: windows
-        .filter((window) => typeof window.usedPercent === 'number')
         .map((window) => ({
           label: window.label ?? '',
-          remaining: clampPercent(100 - (window.usedPercent as number)),
-        })),
+          remaining: remainingFromUsed(window.usedPercent),
+        }))
+        .filter((limit): limit is TimelineLimit => limit.remaining !== null),
       resetCredits,
     };
   }
@@ -455,8 +530,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     if (!billing || billing.periodType !== 'weekly') return empty;
     if (typeof billing.resetAtMs !== 'number' || !Number.isFinite(billing.resetAtMs)) return empty;
 
-    const remaining =
-      typeof billing.usagePercent === 'number' ? clampPercent(100 - billing.usagePercent) : null;
+    const remaining = remainingFromUsed(billing.usagePercent);
 
     return {
       ...empty,
@@ -470,8 +544,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       limits: (billing.productUsage ?? [])
         .map((entry) => ({
           label: entry.product ?? '',
-          remaining:
-            typeof entry.usagePercent === 'number' ? clampPercent(100 - entry.usagePercent) : null,
+          remaining: remainingFromUsed(entry.usagePercent),
         }))
         .filter((limit): limit is TimelineLimit => limit.remaining !== null),
     };
@@ -549,20 +622,15 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     const chosen = pickLaneWindow(windows, maxPeriodHours);
     if (!chosen) return empty;
 
-    const remainingOf = (window: MetaWindowLike) =>
-      typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent)
-        ? clampPercent(100 - window.usedPercent)
-        : null;
-
     return {
       ...empty,
       anchorMs: chosen.resetAtMs,
       periodHours: chosen.periodHours,
-      remaining: remainingOf(chosen),
+      remaining: remainingFromUsed(chosen.usedPercent),
       limits: windows
         .map((window) => ({
           label: `meta_quota.${window.id}`,
-          remaining: remainingOf(window),
+          remaining: remainingFromUsed(window.usedPercent),
         }))
         .filter((limit): limit is TimelineLimit => limit.remaining !== null),
     };

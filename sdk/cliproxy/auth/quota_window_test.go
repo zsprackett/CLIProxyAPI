@@ -8,12 +8,21 @@ import (
 	"time"
 )
 
-func quotaSignals(observedAt time.Time, kv ...string) QuotaState {
-	signals := make(map[string]string, len(kv)/2)
+func quotaTestHeaders(kv ...string) http.Header {
+	h := make(http.Header, len(kv)/2)
 	for i := 0; i+1 < len(kv); i += 2 {
-		signals[http.CanonicalHeaderKey(kv[i])] = kv[i+1]
+		h.Set(kv[i], kv[i+1])
 	}
-	return QuotaState{ObservedAt: observedAt, Signals: signals}
+	return h
+}
+
+func quotaTestSnapshot(t *testing.T, provider, model string, now time.Time, kv ...string) QuotaSnapshot {
+	t.Helper()
+	var snapshot QuotaSnapshot
+	if !snapshot.ObserveResponseHeaders(provider, model, quotaTestHeaders(kv...), now) {
+		t.Fatalf("ObserveResponseHeaders(%s, %s) reported no change", provider, model)
+	}
+	return snapshot
 }
 
 func windowsByClass(windows []QuotaWindow) map[string]QuotaWindow {
@@ -25,40 +34,48 @@ func windowsByClass(windows []QuotaWindow) map[string]QuotaWindow {
 }
 
 func TestQuotaWindowsForAuthClaude(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
+	now := time.Now()
 	reset := strconv.FormatInt(now.Add(3*time.Hour).Unix(), 10)
 	auth := &Auth{
 		Provider: "claude",
-		Quota: quotaSignals(now,
+		QuotaSnapshot: quotaTestSnapshot(t, "claude", "claude-fable-5-1", now,
 			"Anthropic-Ratelimit-Unified-5h-Utilization", "0.25",
 			"Anthropic-Ratelimit-Unified-5h-Reset", reset,
-			"Anthropic-Ratelimit-Unified-7d-Utilization", "0.5",
-			// 7d_oi is ignored on the credential-wide snapshot.
-			"Anthropic-Ratelimit-Unified-7d_oi-Utilization", "0.9",
+			"Anthropic-Ratelimit-Unified-7d-Utilization", "0.55",
+			"Anthropic-Ratelimit-Unified-7d_oi-Utilization", "0.4",
 		),
-		ModelStates: map[string]*ModelState{
-			"claude-fable-5-1": {Quota: quotaSignals(now.Add(time.Minute),
-				"Anthropic-Ratelimit-Unified-7d_oi-Utilization", "0.4",
-				"Anthropic-Ratelimit-Unified-7d-Utilization", "0.55")},
-		},
 	}
 	got := windowsByClass(QuotaWindowsForAuth(auth))
 	if len(got) != 3 {
 		t.Fatalf("windows = %+v, want 5h, 7d and 7d_oi", got)
 	}
-	if w := got["claude:5h"]; w.UsedPercent != 25 || w.ResetAt.Unix() != now.Add(3*time.Hour).Unix() || w.Window != 5*time.Hour {
+	if w := got["claude:5h"]; w.UsedPercent != 25 || w.ResetAt.Unix() != now.Add(3*time.Hour).Unix() || w.Window != 5*time.Hour || w.ModelScope != "" {
 		t.Fatalf("5h window = %+v", w)
 	}
-	if w := got["claude:7d"]; w.UsedPercent != 55 || !w.ModelScoped {
-		t.Fatalf("7d window should come from the newer model snapshot: %+v", w)
+	if w := got["claude:7d"]; w.UsedPercent != 55 || w.ModelScope != "" {
+		t.Fatalf("7d window = %+v", w)
 	}
-	if w := got["claude:7d_oi"]; math.Abs(w.UsedPercent-40) > 1e-9 || !w.ModelScoped {
+	if w := got["claude:7d_oi"]; math.Abs(w.UsedPercent-40) > 1e-9 || w.ModelScope != "fable" {
 		t.Fatalf("7d_oi window = %+v", w)
 	}
 }
 
+func TestQuotaWindowsForAuthClaudeDropsScopedWindowForOtherModels(t *testing.T) {
+	auth := &Auth{
+		Provider: "claude",
+		QuotaSnapshot: quotaTestSnapshot(t, "claude", "claude-opus-4-6", time.Now(),
+			"Anthropic-Ratelimit-Unified-7d-Utilization", "0.5",
+			"Anthropic-Ratelimit-Unified-7d_oi-Utilization", "0.9",
+		),
+	}
+	got := windowsByClass(QuotaWindowsForAuth(auth))
+	if len(got) != 1 || got["claude:7d"].UsedPercent != 50 {
+		t.Fatalf("windows = %+v, want only 7d", got)
+	}
+}
+
 func TestQuotaWindowsForAuthCodex(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
+	now := time.Now()
 	cases := []struct {
 		name    string
 		signals []string
@@ -75,10 +92,19 @@ func TestQuotaWindowsForAuthCodex(t *testing.T) {
 			"X-Codex-Primary-Used-Percent", "5", "X-Codex-Primary-Window-Minutes", "43200",
 		}, map[string]float64{"codex:monthly": 5}},
 		{"missing window length", []string{"X-Codex-Primary-Used-Percent", "5"}, map[string]float64{}},
+		{"known percent wins over the namespace limit_reached flag", []string{
+			"X-Codex-Primary-Used-Percent", "100", "X-Codex-Primary-Window-Minutes", "300",
+			"X-Codex-Secondary-Used-Percent", "30", "X-Codex-Secondary-Window-Minutes", "10080",
+			"X-Codex-Limit-Reached", "true",
+		}, map[string]float64{"codex:5h": 100, "codex:weekly": 30}},
+		{"limit_reached fills an unknown percent", []string{
+			"X-Codex-Primary-Window-Minutes", "300", "X-Codex-Primary-Reset-After-Seconds", "600",
+			"X-Codex-Limit-Reached", "true",
+		}, map[string]float64{"codex:5h": 100}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "codex", Quota: quotaSignals(now, tc.signals...)}))
+			got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "codex", QuotaSnapshot: quotaTestSnapshot(t, "codex", "", now, tc.signals...)}))
 			if len(got) != len(tc.want) {
 				t.Fatalf("windows = %+v, want %v", got, tc.want)
 			}
@@ -89,44 +115,70 @@ func TestQuotaWindowsForAuthCodex(t *testing.T) {
 			}
 		})
 	}
-	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "codex", Quota: quotaSignals(now, cases[0].signals...)}))
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "codex", QuotaSnapshot: quotaTestSnapshot(t, "codex", "", now, cases[0].signals...)}))
 	if reset := got["codex:5h"].ResetAt; !reset.Equal(now.Add(10 * time.Minute)) {
 		t.Fatalf("relative reset = %v, want observed+10m", reset)
 	}
 }
 
 func TestQuotaWindowsForAuthXAIAndDevin(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	xai := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "xai", Quota: quotaSignals(now,
-		"X-Xai-Billing-Period-Type", "monthly", "X-Xai-Billing-Used-Percent", "33.5", "X-Xai-Billing-Window-Minutes", "44640")}))
+	now := time.Now()
+	var xaiSnapshot QuotaSnapshot
+	xaiObs, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "monthly", "X-Xai-Billing-Used-Percent", "33.5", "X-Xai-Billing-Window-Minutes", "44640"), now)
+	if !ok || !xaiSnapshot.Observe(xaiObs) {
+		t.Fatal("xai billing headers produced no observation")
+	}
+	xai := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "xai", QuotaSnapshot: xaiSnapshot}))
 	if w := xai["xai:monthly"]; w.UsedPercent != 33.5 || w.Window != 44640*time.Minute {
 		t.Fatalf("xai window = %+v", xai)
 	}
 
-	resetAt := now.Add(5 * time.Hour).UTC()
-	devin := &Auth{Provider: "devin", Quota: QuotaState{ObservedAt: now, Signals: map[string]string{
-		"daily_quota_remaining_percent":  "80%",
-		"weekly_quota_remaining_percent": "bogus",
-		"daily_quota_reset_at":           resetAt.Format(time.RFC3339),
-	}}}
-	got := windowsByClass(QuotaWindowsForAuth(devin))
-	if len(got) != 1 {
-		t.Fatalf("devin windows = %+v, want only daily", got)
+	dailyReset := now.Add(5 * time.Hour).UTC().Truncate(time.Second)
+	weeklyReset := now.Add(48 * time.Hour).UTC().Truncate(time.Second)
+	var devinSnapshot QuotaSnapshot
+	if !devinSnapshot.Observe(DevinStatusObservation(SourceRefresh, "pro", 80, 60, dailyReset, weeklyReset, time.Time{}, time.Time{}, now)) {
+		t.Fatal("devin observation reported no change")
 	}
-	if w := got["devin:daily"]; w.UsedPercent != 20 || !w.ResetAt.Equal(resetAt) {
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "devin", QuotaSnapshot: devinSnapshot}))
+	if len(got) != 2 {
+		t.Fatalf("devin windows = %+v, want daily and weekly", got)
+	}
+	if w := got["devin:daily"]; w.UsedPercent != 20 || !w.ResetAt.Equal(dailyReset) {
 		t.Fatalf("devin daily = %+v", w)
+	}
+	if w := got["devin:weekly"]; w.UsedPercent != 40 || !w.ResetAt.Equal(weeklyReset) {
+		t.Fatalf("devin weekly = %+v", w)
 	}
 }
 
 func TestQuotaWindowsForAuthIgnoresUnusableSnapshots(t *testing.T) {
-	if got := QuotaWindowsForAuth(&Auth{Provider: "claude", Quota: quotaSignals(time.Time{}, "Anthropic-Ratelimit-Unified-5h-Utilization", "0.1")}); got != nil {
-		t.Fatalf("snapshot without observation time produced %+v", got)
+	if got := QuotaWindowsForAuth(&Auth{Provider: "claude"}); got != nil {
+		t.Fatalf("empty snapshot produced %+v", got)
 	}
-	if got := QuotaWindowsForAuth(&Auth{Provider: "gemini", Quota: quotaSignals(time.Now(), "X-Anything", "1")}); got != nil {
+	var unsupported QuotaSnapshot
+	if unsupported.ObserveResponseHeaders("gemini", "", quotaTestHeaders("X-Anything", "1"), time.Now()) {
+		t.Fatal("unsupported provider reported an observation")
+	}
+	if got := QuotaWindowsForAuth(&Auth{Provider: "gemini", QuotaSnapshot: unsupported}); got != nil {
 		t.Fatalf("unsupported provider produced %+v", got)
 	}
-	got := QuotaWindowsForAuth(&Auth{Provider: "claude", Quota: quotaSignals(time.Now(), "Anthropic-Ratelimit-Unified-5h-Utilization", "1.7")})
+	got := QuotaWindowsForAuth(&Auth{Provider: "claude", QuotaSnapshot: quotaTestSnapshot(t, "claude", "", time.Now(), "Anthropic-Ratelimit-Unified-5h-Utilization", "1.7")})
 	if len(got) != 1 || got[0].UsedPercent != 100 {
 		t.Fatalf("utilization above 100%% should clamp: %+v", got)
+	}
+}
+
+func TestQuotaWindowsForAuthSkipsPassedResetsAndUnknownPercent(t *testing.T) {
+	now := time.Now()
+	passed := strconv.FormatInt(now.Add(-time.Hour).Unix(), 10)
+	future := strconv.FormatInt(now.Add(time.Hour).Unix(), 10)
+	snapshot := quotaTestSnapshot(t, "claude", "", now,
+		"Anthropic-Ratelimit-Unified-5h-Utilization", "0.3",
+		"Anthropic-Ratelimit-Unified-5h-Reset", passed,
+		"Anthropic-Ratelimit-Unified-7d-Reset", future,
+	)
+	if got := QuotaWindowsForAuth(&Auth{Provider: "claude", QuotaSnapshot: snapshot}); len(got) != 0 {
+		t.Fatalf("passed reset and unknown percent should be skipped: %+v", got)
 	}
 }

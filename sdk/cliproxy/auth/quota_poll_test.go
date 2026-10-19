@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -104,11 +105,20 @@ func TestManager_QuotaPollTargetsAndObservation(t *testing.T) {
 	before, _ := manager.GetByID("codex-a")
 	manager.pollQuotaOnce(ctx, targets[0])
 	after, _ := manager.GetByID("codex-a")
-	if got := after.Quota.Signals["X-Codex-Primary-Used-Percent"]; got != "40" {
-		t.Fatalf("polled signal = %q, want 40 (signals %#v)", got, after.Quota.Signals)
+	var primary *QuotaWindowObs
+	for i := range after.QuotaSnapshot.Windows {
+		if after.QuotaSnapshot.Windows[i].ID == "primary" {
+			primary = &after.QuotaSnapshot.Windows[i]
+		}
 	}
-	if after.Quota.ObservedAt.IsZero() {
-		t.Fatal("polled snapshot has no observation time")
+	if primary == nil {
+		t.Fatalf("polled snapshot has no primary window: %+v", after.QuotaSnapshot)
+	}
+	if used, known := primary.Used.Get(); !known || used != 40 || primary.Source != SourcePoll {
+		t.Fatalf("polled primary window = %+v", *primary)
+	}
+	if after.QuotaSnapshot.UpdatedAt.IsZero() || after.QuotaSnapshot.LastPoll == nil {
+		t.Fatalf("polled snapshot has no observation time or poll status: %+v", after.QuotaSnapshot)
 	}
 	if !after.Quota.Exceeded || after.Quota.Reason != "quota" || !after.Quota.NextRecoverAt.Equal(nextRecover) {
 		t.Fatalf("polling changed cooldown state: %#v", after.Quota)
@@ -316,10 +326,9 @@ func TestQuotaPollDoesNotClearXAICooldown(t *testing.T) {
 }
 
 func TestPollShowsQuotaCapacity(t *testing.T) {
-	observe := func(provider string, h http.Header) QuotaState {
-		var q QuotaState
-		q.ObserveResponseHeadersForProvider(provider, h, time.Now())
-		return q
+	observe := func(provider string, h http.Header) QuotaObservation {
+		obs, _ := fromHeadersAdapter(provider, h, time.Now())
+		return obs
 	}
 	codexWith := func(key, value string) http.Header {
 		h := codexPollHeaders("")
@@ -350,7 +359,7 @@ func TestPollShowsQuotaCapacity(t *testing.T) {
 		{"unknown provider", "gemini", codexPollHeaders(""), false},
 	}
 	for _, tc := range cases {
-		if got := pollShowsQuotaCapacity(tc.provider, observe(tc.provider, tc.headers)); got != tc.want {
+		if got := pollShowsQuotaCapacity(observe(tc.provider, tc.headers)); got != tc.want {
 			t.Errorf("%s: pollShowsQuotaCapacity = %t, want %t", tc.name, got, tc.want)
 		}
 	}
@@ -380,5 +389,75 @@ func TestHasActiveQuotaCooldown(t *testing.T) {
 		if got := hasActiveQuotaCooldown(tc.auth, now); got != tc.want {
 			t.Errorf("%s: hasActiveQuotaCooldown = %t, want %t", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestQuotaPollKeepsClaudeFableWindowForRouting(t *testing.T) {
+	now := time.Now()
+	obs, ok := fromHeadersAdapter("claude", quotaTestHeaders(
+		"Anthropic-Ratelimit-Unified-5h-Utilization", "0.2",
+		"Anthropic-Ratelimit-Unified-7d-Utilization", "0.4",
+		"Anthropic-Ratelimit-Unified-7d_oi-Utilization", "0.6",
+		"Anthropic-Ratelimit-Unified-7d_oi-Reset", strconv.FormatInt(now.Add(time.Hour).Unix(), 10),
+	), now)
+	if !ok {
+		t.Fatal("claude poll headers produced no observation")
+	}
+	var snapshot QuotaSnapshot
+	snapshot.Observe(obs)
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "claude", QuotaSnapshot: snapshot}))
+	fable, ok := got["claude:7d_oi"]
+	if !ok {
+		t.Fatalf("polled 7d_oi window missing from routing windows: %+v", got)
+	}
+	if fable.ModelScope != "fable" || fable.UsedPercent != 60 {
+		t.Fatalf("claude:7d_oi = %+v, want scope fable at 60", fable)
+	}
+}
+
+func TestQuotaPollXAIPeriodSwitchRetiresWeeklyWindow(t *testing.T) {
+	now := time.Now()
+	var snapshot QuotaSnapshot
+	weekly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "weekly", "X-Xai-Billing-Used-Percent", "40"), now.Add(-time.Hour))
+	if !ok || !snapshot.Observe(weekly) {
+		t.Fatal("weekly xai poll produced no change")
+	}
+	monthly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "monthly", "X-Xai-Billing-Used-Percent", "12"), now)
+	if !ok || !snapshot.Observe(monthly) {
+		t.Fatal("monthly xai poll produced no change")
+	}
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "xai", QuotaSnapshot: snapshot}))
+	if stale, ok := got["xai:weekly"]; ok {
+		t.Fatalf("stale weekly window survived the switch to a monthly period: %+v", stale)
+	}
+	if got["xai:monthly"].UsedPercent != 12 {
+		t.Fatalf("monthly window = %+v, want 12 used", got["xai:monthly"])
+	}
+}
+
+func TestQuotaPollXAIWeeklyAfterMonthlyRetiresMonthlyWindow(t *testing.T) {
+	now := time.Now()
+	var snapshot QuotaSnapshot
+	monthly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "monthly", "X-Xai-Billing-Used-Percent", "12",
+		"X-Xai-Billing-Window-Minutes", "43200",
+		"X-Xai-Billing-Reset-At", now.Add(500*time.Hour).UTC().Format(time.RFC3339)), now.Add(-time.Hour))
+	if !ok || !snapshot.Observe(monthly) {
+		t.Fatal("monthly xai poll produced no change")
+	}
+	weekly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "weekly", "X-Xai-Billing-Used-Percent", "35",
+		"X-Xai-Billing-Reset-At", now.Add(100*time.Hour).UTC().Format(time.RFC3339)), now)
+	if !ok || !snapshot.Observe(weekly) {
+		t.Fatal("weekly xai poll produced no change")
+	}
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "xai", QuotaSnapshot: snapshot}))
+	if stale, ok := got["xai:monthly"]; ok {
+		t.Fatalf("stale monthly window survived the switch to a weekly period: %+v", stale)
+	}
+	if got["xai:weekly"].UsedPercent != 35 {
+		t.Fatalf("weekly window = %+v, want 35 used", got["xai:weekly"])
 	}
 }

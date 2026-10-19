@@ -3,8 +3,8 @@
  *
  * Each row shows every window side by side with its remaining percentage and
  * reset time, so a whole fleet fits on one screen. Rows fall back to the
- * passive snapshot the proxy recorded from response headers until a live
- * reading is loaded, and say which one they show.
+ * quota snapshot the proxy keeps from its poll and response headers until a
+ * live reading is loaded, and say which one they show.
  */
 
 import { useTranslation } from 'react-i18next';
@@ -13,14 +13,14 @@ import { IconRefreshCw } from '@/components/ui/icons';
 import { PlanBadge } from '@/features/authFiles/components/PlanBadge';
 import { resolveAuthFilePlan } from '@/features/authFiles/plan';
 import type { AuthFileItem, ResolvedTheme } from '@/types';
-import { formatInstantShort, formatRelativeInstant, resolveQuotaErrorMessage } from '@/utils/quota';
+import { formatRelativeInstant, resolveQuotaErrorMessage } from '@/utils/quota';
 import { getQuotaDisplayName } from '@/utils/quota/identity';
-import { maskIdentity, type LedgerCredential, type LedgerWindow } from '../ledgerModel';
+import { maskIdentity, type LedgerCredential } from '../ledgerModel';
 import type { QuotaFileEntry } from '../logic';
 import type { QuotaCardState } from '../providers';
 import type { QuotaProviderType } from '../providers/types';
+import { LedgerWindowList } from '../snapshot/WindowList';
 import { ProviderMark } from './ProviderMark';
-import { remainingTone } from './ledgerTone';
 import styles from './QuotaLedger.module.scss';
 
 export interface LedgerItem {
@@ -39,9 +39,6 @@ export interface QuotaLedgerProps {
   nextPickKeys: ReadonlySet<string>;
   onRefresh: (entry: QuotaFileEntry) => void;
 }
-
-const windowLabel = (t: TFunction, window: LedgerWindow): string =>
-  window.labelKey ? t(window.labelKey, window.labelParams) : (window.label ?? window.id);
 
 const planLabel = (
   t: TFunction,
@@ -92,37 +89,6 @@ export function QuotaLedger({
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage;
 
-  const renderWindow = (window: LedgerWindow) => {
-    const percent = window.remaining === null ? '--' : `${Math.round(window.remaining)}%`;
-    return (
-      <div key={window.id} className={styles.window}>
-        <div className={styles.windowHead}>
-          <span className={styles.windowLabel}>{windowLabel(t, window)}</span>
-          <span className={styles.windowPercent}>{percent}</span>
-        </div>
-        <span className={styles.bar} aria-hidden="true">
-          <span
-            className={`${styles.barFill} ${styles[remainingTone(window.remaining)]}`}
-            style={{ width: `${window.remaining ?? 0}%` }}
-          />
-        </span>
-        <span className={styles.windowReset}>
-          {window.resetAtMs === null ? (
-            t('quota_management.ledger_no_reset')
-          ) : (
-            <>
-              <span className={styles.resetRelative}>
-                {formatRelativeInstant(window.resetAtMs, nowMs, locale)}
-              </span>
-              {' · '}
-              {formatInstantShort(window.resetAtMs)}
-            </>
-          )}
-        </span>
-      </div>
-    );
-  };
-
   const renderRow = ({ entry, credential, quota }: LedgerItem) => {
     const { row } = credential;
     const status = quota?.status ?? 'idle';
@@ -163,10 +129,10 @@ export function QuotaLedger({
           {errorMessage && <span className={styles.error}>{errorMessage}</span>}
         </div>
 
-        <div className={styles.windows}>
-          {row.windows.length > 0 ? (
-            row.windows.map(renderWindow)
-          ) : (
+        {row.windows.length > 0 ? (
+          <LedgerWindowList windows={row.windows} nowMs={nowMs} />
+        ) : (
+          <div className={styles.windows}>
             <span className={styles.empty}>
               {loading
                 ? t('quota_management.ledger_loading')
@@ -176,8 +142,8 @@ export function QuotaLedger({
                     })
                   : t('quota_management.ledger_no_data')}
             </span>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className={styles.actions}>
           <button

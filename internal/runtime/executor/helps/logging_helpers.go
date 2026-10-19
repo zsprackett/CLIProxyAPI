@@ -401,7 +401,9 @@ func AppendAPIWebsocketResponse(ctx context.Context, cfg *config.Config, payload
 }
 
 // AppendCodexAPIWebsocketResponse stores a codex upstream websocket response frame and merges any
-// quota event headers carried by the frame into the request log.
+// quota event headers carried by the frame into the request log. MarkResult reads those headers
+// from the log context and feeds them to QuotaSnapshot.ObserveResponseHeaders, so the websocket
+// path and the HTTP path share one header parser.
 func AppendCodexAPIWebsocketResponse(ctx context.Context, cfg *config.Config, payload []byte) {
 	logging.MergeResponseHeaders(ctx, ParseCodexQuotaEventHeaders(payload))
 	AppendAPIWebsocketResponse(ctx, cfg, payload)

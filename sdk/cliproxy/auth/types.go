@@ -78,8 +78,11 @@ type Auth struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 	// Metadata stores runtime mutable provider state (e.g. tokens, cookies).
 	Metadata map[string]any `json:"metadata,omitempty"`
-	// Quota captures recent quota information for load balancers.
+	// Quota captures the quota cooldown of the credential for load balancers.
 	Quota QuotaState `json:"quota"`
+	// QuotaSnapshot is the typed quota record of the credential. Only
+	// QuotaSnapshot.apply writes it.
+	QuotaSnapshot QuotaSnapshot `json:"quota_snapshot"`
 	// LastError stores the last failure encountered while executing or refreshing.
 	LastError *Error `json:"last_error,omitempty"`
 	// CreatedAt is the creation timestamp in UTC.
@@ -171,7 +174,8 @@ type RecentRequestBucket struct {
 	Failed  int64  `json:"failed"`
 }
 
-// QuotaState contains limiter tracking data for a credential.
+// QuotaState contains the quota cooldown of a credential or a model. Observed
+// quota lives in QuotaSnapshot.
 type QuotaState struct {
 	// Exceeded indicates the credential recently hit a quota error.
 	Exceeded bool `json:"exceeded"`
@@ -181,27 +185,6 @@ type QuotaState struct {
 	NextRecoverAt time.Time `json:"next_recover_at"`
 	// BackoffLevel stores the progressive cooldown exponent used for rate limits.
 	BackoffLevel int `json:"backoff_level,omitempty"`
-	// ObservedAt is the time the current Signals snapshot was observed.
-	ObservedAt time.Time `json:"observed_at,omitempty"`
-	// Signals stores bounded, provider-specific quota watermark values observed
-	// from upstream response headers or websocket quota events. It is a snapshot
-	// of one upstream response, not an accumulation across responses, so an
-	// expired watermark cannot linger after the response that produced it.
-	// Cooldown transitions must use applyCooldownFields so they cannot replace
-	// this snapshot.
-	Signals map[string]string `json:"signals,omitempty"`
-}
-
-// Clone returns an independent copy of the quota state.
-func (q QuotaState) Clone() QuotaState {
-	copyQuota := q
-	if len(q.Signals) > 0 {
-		copyQuota.Signals = make(map[string]string, len(q.Signals))
-		for key, value := range q.Signals {
-			copyQuota.Signals[key] = value
-		}
-	}
-	return copyQuota
 }
 
 // ModelState captures the execution state for a specific model under an auth entry.
@@ -292,7 +275,7 @@ func (a *Auth) Clone() *Auth {
 		return nil
 	}
 	copyAuth := *a
-	copyAuth.Quota = a.Quota.Clone()
+	copyAuth.QuotaSnapshot = a.QuotaSnapshot.Clone()
 	if a.Attributes != nil {
 		copyAuth.Attributes = make(map[string]string, len(a.Attributes))
 		for key, value := range a.Attributes {
@@ -437,7 +420,6 @@ func (m *ModelState) Clone() *ModelState {
 		return nil
 	}
 	copyState := *m
-	copyState.Quota = m.Quota.Clone()
 	if m.LastError != nil {
 		copyState.LastError = &Error{
 			Code:       m.LastError.Code,

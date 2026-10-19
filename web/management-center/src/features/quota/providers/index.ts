@@ -31,7 +31,7 @@ export interface QuotaCardState {
   status: 'idle' | 'loading' | 'success' | 'error';
   error?: string;
   errorStatus?: number;
-  /** When a success state was fetched, so the ledger can tell it from a newer backend snapshot. */
+  /** When a success state was fetched, so `newerQuotaReading` can compare it with the snapshot. */
   fetchedAtMs?: number;
 }
 

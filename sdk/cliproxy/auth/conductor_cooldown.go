@@ -383,8 +383,7 @@ func (m *Manager) restoreCooldownRecordLocked(record CooldownStateRecord, now ti
 		auth.Unavailable = true
 		auth.Status = StatusError
 		auth.NextRetryAfter = record.NextRetryAfter
-		applyCooldownFields(&auth.Quota, quota)
-		auth.Quota = mergeQuotaObservation(auth.Quota, quota)
+		auth.Quota = quota
 		auth.Generation++
 		auth.UpdatedAt = updatedAt
 		if reason != "" {
@@ -418,7 +417,7 @@ func clearCooldownStateForAuth(auth *Auth, now time.Time) bool {
 	if auth.Unavailable || !auth.NextRetryAfter.IsZero() || auth.Quota.Exceeded || !auth.Quota.NextRecoverAt.IsZero() {
 		auth.Unavailable = false
 		auth.NextRetryAfter = time.Time{}
-		applyCooldownFields(&auth.Quota, QuotaState{})
+		auth.Quota = QuotaState{}
 		auth.UpdatedAt = now
 		changed = true
 	}
@@ -429,7 +428,7 @@ func clearCooldownStateForAuth(auth *Auth, now time.Time) bool {
 		if state.Unavailable || !state.NextRetryAfter.IsZero() || state.Quota.Exceeded || !state.Quota.NextRecoverAt.IsZero() {
 			state.Unavailable = false
 			state.NextRetryAfter = time.Time{}
-			applyCooldownFields(&state.Quota, QuotaState{})
+			state.Quota = QuotaState{}
 			state.UpdatedAt = now
 			changed = true
 		}
@@ -661,74 +660,71 @@ func (m *Manager) cooldownStateRecordsForAuthLocked(auth *Auth, now time.Time) [
 	return records
 }
 
-// withQuotaObservations attaches each fresh passive quota observation to the
-// persisted record for the same auth/model, adding an observation-only record
-// where no cooldown exists. Stores key records by auth and model, so one record
-// carries both. Change detection does not use this, so observations alone never
-// trigger a save outside the MarkResult throttle.
+// withQuotaObservations attaches the credential's quota snapshot to the
+// auth-level record, adding an observation-only record where no cooldown
+// exists. Change detection does not use this, so a snapshot alone never
+// triggers a save outside the MarkResult throttle.
 func withQuotaObservations(auth *Auth, records []CooldownStateRecord, now time.Time) []CooldownStateRecord {
 	if auth == nil || auth.ID == "" || auth.Disabled || auth.Status == StatusDisabled {
 		return records
 	}
-	attach := func(model string, quota QuotaState, updatedAt time.Time) {
-		if quota.ObservedAt.IsZero() || len(quota.Signals) == 0 || now.Sub(quota.ObservedAt) > quotaObservationRetention {
-			return
-		}
-		observation := quota.Clone()
-		for i := range records {
-			if records[i].Model == model {
-				records[i].Quota.ObservedAt = observation.ObservedAt
-				records[i].Quota.Signals = observation.Signals
-				return
-			}
-		}
-		records = append(records, CooldownStateRecord{
-			Provider:  strings.TrimSpace(auth.Provider),
-			AuthID:    auth.ID,
-			AuthFile:  cooldownAuthFile(auth),
-			Model:     model,
-			Status:    cooldownStateStatusObserved,
-			Quota:     QuotaState{ObservedAt: observation.ObservedAt, Signals: observation.Signals},
-			UpdatedAt: updatedAt,
-		})
+	snapshot := auth.QuotaSnapshot.Clone()
+	if snapshot.Provider == "" || snapshot.UpdatedAt.IsZero() || now.Sub(snapshot.UpdatedAt) > quotaObservationRetention {
+		return records
 	}
-	attach("", auth.Quota, auth.UpdatedAt)
-	for model, state := range auth.ModelStates {
-		if state != nil && strings.TrimSpace(model) != "" {
-			attach(strings.TrimSpace(model), state.Quota, state.UpdatedAt)
+	for i := range records {
+		if records[i].Model == "" {
+			records[i].Snapshot = &snapshot
+			return records
 		}
 	}
+	records = append(records, CooldownStateRecord{
+		Provider:  strings.TrimSpace(auth.Provider),
+		AuthID:    auth.ID,
+		AuthFile:  cooldownAuthFile(auth),
+		Status:    cooldownStateStatusObserved,
+		Snapshot:  &snapshot,
+		UpdatedAt: auth.UpdatedAt,
+	})
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].Model < records[j].Model
 	})
 	return records
 }
 
-// restoreQuotaObservationLocked merges a saved observation into the auth or model
-// state. The newest observation wins, so a live response after startup is kept.
+// restoreQuotaObservationLocked merges a saved snapshot into the auth. Per
+// window the newest observation wins, so a live response after startup is
+// kept. Windows older than the retention are pruned; extras are kept. A
+// legacy record that still carries quota.signals is converted once through the
+// header parsers.
 func (m *Manager) restoreQuotaObservationLocked(record CooldownStateRecord, now time.Time) bool {
-	quota := record.Quota
-	if quota.ObservedAt.IsZero() || len(quota.Signals) == 0 || now.Sub(quota.ObservedAt) > quotaObservationRetention {
-		return false
-	}
 	auth := m.auths[strings.TrimSpace(record.AuthID)]
-	if auth == nil || auth.Disabled || auth.Status == StatusDisabled || !ProviderSupportsQuotaObservation(auth.Provider) {
+	if auth == nil || auth.Disabled || auth.Status == StatusDisabled {
 		return false
 	}
-	observation := QuotaState{ObservedAt: quota.ObservedAt, Signals: quota.Clone().Signals}
-	model := strings.TrimSpace(record.Model)
-	if model == "" {
-		before := auth.Quota.ObservedAt
-		auth.Quota = mergeQuotaObservation(auth.Quota, observation)
-		return !auth.Quota.ObservedAt.Equal(before)
-	}
-	state := ensureModelState(auth, model)
-	if state == nil {
+	kind, ok := providerKindOf(auth.Provider)
+	if !ok {
 		return false
 	}
-	before := state.Quota.ObservedAt
-	state.Quota = mergeQuotaObservation(state.Quota, observation)
-	return !state.Quota.ObservedAt.Equal(before)
+	if record.Snapshot != nil && strings.TrimSpace(record.Model) == "" {
+		saved := record.Snapshot.Clone()
+		if saved.Provider != kind {
+			return false
+		}
+		kept := saved.Windows[:0]
+		for _, window := range saved.Windows {
+			if !window.ObservedAt.IsZero() && now.Sub(window.ObservedAt) <= quotaObservationRetention {
+				kept = append(kept, window)
+			}
+		}
+		saved.Windows = kept
+		return auth.QuotaSnapshot.merge(saved)
+	}
+	obs, ok := legacyQuotaObservation(kind, record, now)
+	if !ok {
+		return false
+	}
+	return auth.QuotaSnapshot.apply(obs)
 }
 
 func cooldownStateRecordsEqual(a, b []CooldownStateRecord) bool {
@@ -786,7 +782,7 @@ func authCooldownStateRecord(auth *Auth, now time.Time) (CooldownStateRecord, bo
 		Status:         "cooling",
 		NextRetryAfter: auth.NextRetryAfter,
 		Reason:         cooldownReason(auth.StatusMessage, auth.Quota, auth.LastError),
-		Quota:          cooldownFieldsOf(auth.Quota),
+		Quota:          auth.Quota,
 		LastError:      cloneError(auth.LastError),
 		UpdatedAt:      auth.UpdatedAt,
 	}, true
@@ -805,7 +801,7 @@ func modelCooldownStateRecord(auth *Auth, model string, state *ModelState, now t
 		Status:         "cooling",
 		NextRetryAfter: state.NextRetryAfter,
 		Reason:         cooldownReason(state.StatusMessage, state.Quota, state.LastError),
-		Quota:          cooldownFieldsOf(state.Quota),
+		Quota:          state.Quota,
 		LastError:      cloneError(state.LastError),
 		UpdatedAt:      state.UpdatedAt,
 	}, true
@@ -863,7 +859,6 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		}
 		now = time.Now()
 		responseHeaders := internallogging.GetResponseHeaders(ctx)
-		modelState := existingModelState(auth, modelKey)
 		var cooldownRecordsBefore []CooldownStateRecord
 		trackCooldownState := m.cooldownStore != nil
 		if trackCooldownState {
@@ -881,7 +876,6 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 				// Retain active credential-scoped cooldown
 			} else if modelKey != "" {
 				state := ensureModelState(auth, modelKey)
-				modelState = state
 				resetModelState(state, now)
 				updateAggregatedAvailability(auth, now)
 				if !hasModelError(auth, now) {
@@ -900,7 +894,6 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						disableCooling = false
 					}
 					state := ensureModelState(auth, modelKey)
-					modelState = state
 					state.Unavailable = true
 					state.Status = StatusError
 					state.UpdatedAt = now
@@ -929,12 +922,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						if auth.LastError != nil {
 							auth.StatusMessage = "cloudflare challenge"
 						}
-						applyCooldownFields(&state.Quota, QuotaState{
+						state.Quota = QuotaState{
 							Exceeded:      true,
 							Reason:        "cloudflare challenge",
 							NextRecoverAt: next,
 							BackoffLevel:  backoffLevel,
-						})
+						}
 					} else if isInvalidGrantResultError(result.Error) {
 						if disableCooling {
 							state.NextRetryAfter = time.Time{}
@@ -994,12 +987,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								}
 							}
 							state.NextRetryAfter = next
-							applyCooldownFields(&state.Quota, QuotaState{
+							state.Quota = QuotaState{
 								Exceeded:      true,
 								Reason:        "quota",
 								NextRecoverAt: next,
 								BackoffLevel:  backoffLevel,
-							})
+							}
 							if result.CredentialScope && !disableCooling {
 								for _, otherState := range auth.ModelStates {
 									if otherState != nil && otherState != state {
@@ -1016,12 +1009,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 											otherRetryAfter = otherState.NextRetryAfter
 										}
 										otherState.NextRetryAfter = otherRetryAfter
-										applyCooldownFields(&otherState.Quota, QuotaState{
+										otherState.Quota = QuotaState{
 											Exceeded:      true,
 											Reason:        "credential_quota",
 											NextRecoverAt: otherQuotaNext,
 											BackoffLevel:  backoffLevel,
-										})
+										}
 									}
 								}
 								auth.Unavailable = true
@@ -1076,10 +1069,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 		observed := false
 		if !result.SkipQuotaObservation {
-			observed = auth.Quota.ObserveResponseHeadersForProvider(result.Provider, responseHeaders, now)
-			if modelState != nil && modelState.Quota.ObserveResponseHeadersForProvider(result.Provider, responseHeaders, now) {
-				observed = true
-			}
+			observed = auth.QuotaSnapshot.ObserveResponseHeaders(result.Provider, result.Model, responseHeaders, now)
 		}
 
 		_ = m.persist(ctx, auth)
@@ -1266,8 +1256,6 @@ func mergeModelState(target, source *ModelState) *ModelState {
 		},
 		UpdatedAt: target.UpdatedAt,
 	}
-	merged.Quota = mergeQuotaObservation(merged.Quota, fallback.Quota)
-	merged.Quota = mergeQuotaObservation(merged.Quota, preferred.Quota)
 	if source.NextRetryAfter.After(merged.NextRetryAfter) {
 		merged.NextRetryAfter = source.NextRetryAfter
 	}
@@ -1307,7 +1295,7 @@ func resetModelState(state *ModelState, now time.Time) {
 	state.StatusMessage = ""
 	state.NextRetryAfter = time.Time{}
 	state.LastError = nil
-	applyCooldownFields(&state.Quota, QuotaState{})
+	state.Quota = QuotaState{}
 	state.UpdatedAt = now
 }
 
@@ -1482,7 +1470,7 @@ func clearAggregatedAvailability(auth *Auth) {
 	}
 	auth.Unavailable = false
 	auth.NextRetryAfter = time.Time{}
-	applyCooldownFields(&auth.Quota, QuotaState{})
+	auth.Quota = QuotaState{}
 }
 
 func hasModelError(auth *Auth, now time.Time) bool {
@@ -2322,12 +2310,12 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 	if isCloudflareChallengeResultError(resultErr) {
 		auth.StatusMessage = "cloudflare challenge"
 		next, backoffLevel := nextCloudflareCooldown(auth.Quota.BackoffLevel, disableCooling, now)
-		applyCooldownFields(&auth.Quota, QuotaState{
+		auth.Quota = QuotaState{
 			Exceeded:      true,
 			Reason:        "cloudflare challenge",
 			NextRecoverAt: next,
 			BackoffLevel:  backoffLevel,
-		})
+		}
 		auth.NextRetryAfter = next
 	} else if isInvalidGrantResultError(resultErr) {
 		auth.StatusMessage = "invalid_grant"
