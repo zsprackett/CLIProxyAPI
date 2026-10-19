@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -388,5 +389,50 @@ func TestHasActiveQuotaCooldown(t *testing.T) {
 		if got := hasActiveQuotaCooldown(tc.auth, now); got != tc.want {
 			t.Errorf("%s: hasActiveQuotaCooldown = %t, want %t", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestQuotaPollKeepsClaudeFableWindowForRouting(t *testing.T) {
+	now := time.Now()
+	obs, ok := fromHeadersAdapter("claude", quotaTestHeaders(
+		"Anthropic-Ratelimit-Unified-5h-Utilization", "0.2",
+		"Anthropic-Ratelimit-Unified-7d-Utilization", "0.4",
+		"Anthropic-Ratelimit-Unified-7d_oi-Utilization", "0.6",
+		"Anthropic-Ratelimit-Unified-7d_oi-Reset", strconv.FormatInt(now.Add(time.Hour).Unix(), 10),
+	), now)
+	if !ok {
+		t.Fatal("claude poll headers produced no observation")
+	}
+	var snapshot QuotaSnapshot
+	snapshot.Observe(obs)
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "claude", QuotaSnapshot: snapshot}))
+	fable, ok := got["claude:7d_oi"]
+	if !ok {
+		t.Fatalf("polled 7d_oi window missing from routing windows: %+v", got)
+	}
+	if fable.ModelScope != "fable" || fable.UsedPercent != 60 {
+		t.Fatalf("claude:7d_oi = %+v, want scope fable at 60", fable)
+	}
+}
+
+func TestQuotaPollXAIPeriodSwitchRetiresWeeklyWindow(t *testing.T) {
+	now := time.Now()
+	var snapshot QuotaSnapshot
+	weekly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "weekly", "X-Xai-Billing-Used-Percent", "40"), now.Add(-time.Hour))
+	if !ok || !snapshot.Observe(weekly) {
+		t.Fatal("weekly xai poll produced no change")
+	}
+	monthly, ok := fromHeadersAdapter("xai", quotaTestHeaders(
+		"X-Xai-Billing-Period-Type", "monthly", "X-Xai-Billing-Used-Percent", "12"), now)
+	if !ok || !snapshot.Observe(monthly) {
+		t.Fatal("monthly xai poll produced no change")
+	}
+	got := windowsByClass(QuotaWindowsForAuth(&Auth{Provider: "xai", QuotaSnapshot: snapshot}))
+	if stale, ok := got["xai:weekly"]; ok {
+		t.Fatalf("stale weekly window survived the switch to a monthly period: %+v", stale)
+	}
+	if got["xai:monthly"].UsedPercent != 12 {
+		t.Fatalf("monthly window = %+v, want 12 used", got["xai:monthly"])
 	}
 }
