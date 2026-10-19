@@ -518,6 +518,8 @@
     "primary_window": "5 小時限額",
     "secondary_window": "週限額",
     "team_secondary_window": "月度限額",
+    "usage_window": "用量限額",
+    "period_window": "用量限額（{{period, period}}）",
     "code_review_primary_window": "程式碼審查 5 小時限額",
     "code_review_secondary_window": "程式碼審查週限額",
     "code_review_team_secondary_window": "程式碼審查月度限額",

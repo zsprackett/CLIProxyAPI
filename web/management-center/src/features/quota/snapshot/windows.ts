@@ -123,7 +123,7 @@ const PERIOD_SECONDS_SUFFIXES: Record<number, string> = {
 const codexPeriodLabel = (
   window: QuotaWindow,
   prefix: string,
-  params: Record<string, string | number> = {}
+  params?: Record<string, string | number>
 ): QuotaWindowLabel | null => {
   const period = window.period_seconds;
   const suffix = window.class
@@ -131,7 +131,11 @@ const codexPeriodLabel = (
     : typeof period === 'number'
       ? PERIOD_SECONDS_SUFFIXES[period]
       : undefined;
-  if (suffix) return { labelKey: `codex_quota.${prefix}${suffix}`, labelParams: params };
+  if (suffix) {
+    return params
+      ? { labelKey: `codex_quota.${prefix}${suffix}`, labelParams: params }
+      : { labelKey: `codex_quota.${prefix}${suffix}` };
+  }
   if (typeof period === 'number' && Number.isFinite(period) && period > 0) {
     return { labelKey: `codex_quota.${prefix}period_window`, labelParams: { ...params, period } };
   }
@@ -166,8 +170,10 @@ export function quotaWindowLabel(
   }
   if (provider === 'codex') {
     if (window.id === 'primary' || window.id === 'secondary') {
-      const labelKey = CODEX_CLASS_SUFFIXES[window.class];
-      if (labelKey) return { labelKey: `codex_quota.${labelKey}` };
+      return (
+        codexPeriodLabel(window, '') ??
+        (window.label ? { label: window.label } : { labelKey: 'codex_quota.usage_window' })
+      );
     }
     const display = codexDisplayLabel(window);
     if (display) return display;
