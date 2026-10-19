@@ -254,6 +254,13 @@ export interface CodexQuotaState {
   errorStatus?: number;
 }
 
+/** Status of an on-demand snapshot poll; the data itself lives in the snapshot store. */
+export interface SnapshotPollState {
+  status: 'idle' | 'loading' | 'error';
+  error?: string;
+  errorStatus?: number;
+}
+
 export interface DevinQuotaWindow {
   id: 'daily' | 'weekly';
   label?: string;
