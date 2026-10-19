@@ -180,6 +180,51 @@ describe('observed Codex quota', () => {
   });
 });
 
+describe('codex weekly summary', () => {
+  test('finds the weekly window by class, not by period', () => {
+    const file: AuthFileItem = {
+      name: 'codex-w@example.com.json',
+      type: 'codex',
+      quota_snapshot: snapshot(
+        'codex',
+        [
+          snapWindow({
+            id: 'additional.primary',
+            class: '',
+            used_percent: 10,
+            reset_at: iso(NOW + 3 * HOUR),
+            period_seconds: 604800,
+            section: 'codex.usage',
+          }),
+          snapWindow({
+            id: 'secondary',
+            class: 'codex:weekly',
+            used_percent: 40,
+            reset_at: iso(NOW + 2 * DAY),
+            period_seconds: null,
+            section: 'codex.usage',
+          }),
+        ],
+        {
+          kind: 'codex',
+          plan: planSection('Pro'),
+          access: absent,
+          credits: absent,
+          subscription: absent,
+          reset_credits: absent,
+        }
+      ),
+    };
+    const row = observedLedgerData('codex', file, NOW);
+    const summary = summarizeProvider(
+      'codex',
+      [{ ...credential('w', []), provider: 'codex', row: row! }],
+      NOW
+    );
+    expect(summary.soonestWeeklyResetMs).toBe(NOW + 2 * DAY);
+  });
+});
+
 describe('observed xAI quota', () => {
   test('reads the weekly and monthly windows', () => {
     const file: AuthFileItem = {
