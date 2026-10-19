@@ -181,7 +181,7 @@ UI (`Cli-Proxy-API-Management-Center`):
 - Order rule: per key, by `ObservedAt`, not by arrival. Extras sections follow the same order: one total order over `ok`, `failed`, and `not_applicable` by the section's latest fact time. A poll that started before a passive response and finished after it loses on the windows the response carried. `ObservedAt` of a poll = time the response body was read.
 - Unknown id, stored but not in the observation: headers observation → keep (headers are partial). Poll with `Sections[s] == ok` → drop windows of section s that the poll did not return (the poll is authoritative for its section). Poll with `Sections[s] == failed` → keep section s windows untouched.
 - Unknown id, in the observation but not stored: add.
-- Expiry instead of replacement: today's "replace the whole map" existed so a stale `limit reached` could not linger. Here each window expires on its own: `QuotaWindowsForAuth` drops a window once `ResetAt` passes, and the UI shows it as "reset, awaiting data".
+- Expiry instead of replacement: today's "replace the whole map" existed so a stale `limit reached` could not linger. Here each window expires on its own: `QuotaWindowsForAuth` drops a window once `ResetAt` passes, and the UI settles a passed reset with a known percent to full with "No reset pending". Only an unknown percent shows "Reset, awaiting data".
 - Provider change (`obs.Provider != s.Provider`): reset the snapshot, then apply.
 - Cooldown clear: `showsCapacity(obs)` on the poll observation alone, then the existing baseline guard. claude: windows five_hour and seven_day both present with known Used < 100. codex: every classed window known < 100, Access ok and !LimitReached and Allowed != false.
 
@@ -215,7 +215,7 @@ type QuotaExtras =
   | { kind: 'codex'; plan: Section<string>; access: Section<CodexAccess>; credits: Section<CodexCredits>; subscription: Section<{active_until: string}>; reset_credits: Section<CodexResetCredits> }
   | { kind: 'xai'; access: 'grok_cli' | 'api_key'; weekly: Section<XaiWeekly>; monthly: Section<XaiMonthly>; account: Section<XaiAccount>; paid_health: Section<XaiPaidHealth> }
   | { kind: 'devin'; plan: Section<{ name: string; start: string | null; end: string | null }> };
-interface QuotaSnapshot { provider: QuotaExtras['kind']; windows: QuotaWindow[]; extras: QuotaExtras | null;
+interface QuotaSnapshot { provider: QuotaExtras['kind'] | ''; windows: QuotaWindow[]; extras: QuotaExtras | null;
   last_poll: { at: string; trigger: 'background' | 'on_demand'; error?: string } | null; updated_at: string | null }
 ```
 A Go test marshals one fixture per provider and the UI test suite type-checks the same fixtures (`tests/fixtures/quota_snapshot_*.json`), so the two sides cannot drift silently.
