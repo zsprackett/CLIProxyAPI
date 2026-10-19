@@ -254,41 +254,48 @@ describe('resolveLedgerRow', () => {
     expect(resolveLedgerRow('claude', file, undefined, NOW).windows[0].remaining).toBe(50);
   });
 
-  test('overlays a snapshot recorded after the live fetch onto the matching live window', () => {
-    const live = {
-      status: 'success',
-      planType: 'plan_max',
-      fetchedAtMs: NOW - 2 * HOUR,
-      windows: [
-        {
-          id: 'seven-day',
-          labelKey: 'claude_quota.seven_day',
-          usedPercent: 10,
-          resetAtMs: NOW + DAY,
-          periodHours: 168,
-        },
-        { id: 'seven-day-opus', usedPercent: 30, resetAtMs: NOW + DAY, periodHours: 168 },
-      ],
-    };
-    const row = resolveLedgerRow('claude', file, live, NOW);
-    expect(row.source).toBe('observed');
-    expect(row.observedAtMs).toBe(NOW - HOUR);
-    expect(row.planType).toBe('plan_max');
-    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([
-      ['seven_day', 50],
-      ['seven-day-opus', 70],
-    ]);
+  const liveTwoWindows = (fetchedAtMs: number) => ({
+    status: 'success',
+    planType: 'plan_max',
+    fetchedAtMs,
+    windows: [
+      { id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 },
+      { id: 'seven-day-opus', usedPercent: 30, resetAtMs: NOW + DAY, periodHours: 168 },
+    ],
   });
 
-  test('keeps a live reading fetched after the observed snapshot', () => {
-    const live = {
-      status: 'success',
-      fetchedAtMs: NOW - 30 * 60 * 1000,
-      windows: [{ id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 }],
-    };
-    const row = resolveLedgerRow('claude', file, live, NOW);
+  const newerSnapshotFile = claudeFile({
+    ...snapshot(
+      'claude',
+      [snapWindow({ used_percent: 50, observed_at: iso(NOW - 3 * HOUR) })],
+      { kind: 'claude', plan: planSection('plan_pro'), extra_usage: absent }
+    ),
+    updated_at: iso(NOW - HOUR),
+  });
+
+  test('a snapshot updated after the live fetch replaces the whole live reading', () => {
+    const leaked = resolveLedgerRow('claude', file, liveTwoWindows(NOW - 2 * HOUR), NOW);
+    expect(leaked.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
+
+    const row = resolveLedgerRow('claude', newerSnapshotFile, liveTwoWindows(NOW - 2 * HOUR), NOW);
+    expect(row.source).toBe('observed');
+    expect(row.planType).toBe('plan_pro');
+    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
+  });
+
+  test('a live reading fetched after the snapshot update replaces the whole snapshot', () => {
+    const row = resolveLedgerRow(
+      'claude',
+      newerSnapshotFile,
+      liveTwoWindows(NOW - 30 * 60 * 1000),
+      NOW
+    );
     expect(row.source).toBe('live');
-    expect(row.windows[0].remaining).toBe(90);
+    expect(row.planType).toBe('plan_max');
+    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([
+      ['seven-day', 90],
+      ['seven-day-opus', 70],
+    ]);
   });
 
   test('reports nothing for providers without data', () => {
