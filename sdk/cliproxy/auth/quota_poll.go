@@ -265,8 +265,9 @@ func fromHeadersAdapter(provider string, headers http.Header, now time.Time) (Qu
 
 // xaiBillingHeadersObservation reads the x-xai-billing-* form the P1 xAI poller
 // synthesizes from the Grok billing endpoints. The legacy .cds restore uses it too.
-// The poller returns a monthly period only when the weekly request succeeded
-// without a weekly period, so a monthly reading also retires the weekly window.
+// The reading carries the active billing period only, so any successful reading
+// marks both xAI sections ok and retires the other period's window. P3 replaces
+// this adapter with independent sections.
 func xaiBillingHeadersObservation(headers http.Header, now time.Time) (QuotaObservation, bool) {
 	used, hasUsed := parseQuotaFloat(quotaHeaderValue(headers, "X-Xai-Billing-Used-Percent"))
 	resetAt := parseQuotaResetAt(quotaHeaderValue(headers, "X-Xai-Billing-Reset-At"), "", now)
@@ -274,10 +275,9 @@ func xaiBillingHeadersObservation(headers http.Header, now time.Time) (QuotaObse
 		return QuotaObservation{}, false
 	}
 	id, section, period := WindowID("weekly"), SectionXAIWeekly, 7*24*time.Hour
-	sections := map[SectionID]SectionStatus{SectionXAIWeekly: SectionOK}
+	sections := map[SectionID]SectionStatus{SectionXAIWeekly: SectionOK, SectionXAIMonthly: SectionOK}
 	if strings.EqualFold(quotaHeaderValue(headers, "X-Xai-Billing-Period-Type"), "monthly") {
 		id, section, period = "monthly", SectionXAIMonthly, 30*24*time.Hour
-		sections[SectionXAIMonthly] = SectionOK
 	}
 	if minutes, ok := parseQuotaFloat(quotaHeaderValue(headers, "X-Xai-Billing-Window-Minutes")); ok && minutes > 0 {
 		period = time.Duration(minutes) * time.Minute
