@@ -1,0 +1,125 @@
+{
+  "provider": "codex",
+  "windows": [
+    {
+      "id": "primary",
+      "class": "codex:5h",
+      "used_percent": 12,
+      "limit_reached": false,
+      "reset_at": "2026-10-19T18:00:00Z",
+      "period_seconds": 18000,
+      "section": "codex.usage",
+      "source": "poll",
+      "observed_at": "2026-10-19T17:00:00Z"
+    },
+    {
+      "id": "secondary",
+      "class": "codex:weekly",
+      "used_percent": 48.5,
+      "limit_reached": false,
+      "reset_at": "2026-10-20T18:00:00Z",
+      "period_seconds": 604800,
+      "section": "codex.usage",
+      "source": "poll",
+      "observed_at": "2026-10-19T17:00:00Z"
+    },
+    {
+      "id": "additional.bengalfox.primary",
+      "class": "",
+      "label": "bengalfox",
+      "used_percent": 3,
+      "limit_reached": false,
+      "reset_at": "2026-10-19T17:50:00Z",
+      "period_seconds": 18000,
+      "section": "codex.usage",
+      "source": "poll",
+      "observed_at": "2026-10-19T17:00:00Z"
+    },
+    {
+      "id": "code_review.primary",
+      "class": "",
+      "used_percent": 7,
+      "limit_reached": false,
+      "reset_at": "2026-10-19T17:20:00Z",
+      "period_seconds": 18000,
+      "section": "codex.usage",
+      "source": "poll",
+      "observed_at": "2026-10-19T17:00:00Z"
+    },
+    {
+      "id": "code_review.secondary",
+      "class": "",
+      "used_percent": 2,
+      "limit_reached": false,
+      "reset_at": "2026-10-20T18:00:00Z",
+      "period_seconds": 604800,
+      "section": "codex.usage",
+      "source": "poll",
+      "observed_at": "2026-10-19T17:00:00Z"
+    }
+  ],
+  "extras": {
+    "kind": "codex",
+    "plan": {
+      "status": "ok",
+      "value": "pro",
+      "value_at": "2026-10-19T17:00:00Z",
+      "checked_at": "2026-10-19T17:00:00Z"
+    },
+    "access": {
+      "status": "ok",
+      "value": {
+        "allowed": true,
+        "limit_reached": false
+      },
+      "value_at": "2026-10-19T17:00:00Z",
+      "checked_at": "2026-10-19T17:00:00Z"
+    },
+    "credits": {
+      "status": "ok",
+      "value": {
+        "has_credits": true,
+        "unlimited": false,
+        "balance": "42.50"
+      },
+      "value_at": "2026-10-19T17:00:00Z",
+      "checked_at": "2026-10-19T17:00:00Z"
+    },
+    "subscription": {
+      "status": "ok",
+      "value": {
+        "active_until": "2026-11-01T00:00:00Z"
+      },
+      "value_at": "2026-10-19T17:00:00Z",
+      "checked_at": "2026-10-19T17:00:00Z"
+    },
+    "reset_credits": {
+      "status": "ok",
+      "value": {
+        "available": 2,
+        "applicable_available": 1,
+        "credits": [
+          {
+            "id": "rc_1",
+            "status": "available",
+            "granted_at": "2026-10-01T00:00:00Z",
+            "expires_at": "2026-12-01T00:00:00Z"
+          },
+          {
+            "id": "rc_2",
+            "status": "available",
+            "granted_at": "2026-10-05T00:00:00Z",
+            "expires_at": "2026-12-05T00:00:00Z"
+          }
+        ]
+      },
+      "value_at": "2026-10-19T17:00:00Z",
+      "checked_at": "2026-10-19T17:00:00Z"
+    }
+  },
+  "last_poll": {
+    "at": "2026-10-19T17:00:00Z",
+    "trigger": "background"
+  },
+  "updated_at": "2026-10-19T17:00:00Z"
+}

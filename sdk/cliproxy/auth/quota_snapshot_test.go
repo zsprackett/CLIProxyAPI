@@ -297,6 +297,35 @@ func TestQuotaSnapshotGolden(t *testing.T) {
 	}
 }
 
+// The Codex golden is written by the Codex poll parser test in
+// internal/runtime/executor/helps; here it must decode and round-trip.
+func TestQuotaSnapshotCodexGoldenRoundTrips(t *testing.T) {
+	path := filepath.Join("testdata", "quota_snapshot_codex.json")
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	var decoded QuotaSnapshot
+	if err := json.Unmarshal(want, &decoded); err != nil {
+		t.Fatalf("unmarshal golden: %v", err)
+	}
+	again, err := json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal decoded: %v", err)
+	}
+	if !bytes.Equal(append(again, '\n'), want) {
+		t.Fatalf("golden does not round-trip\n--- got ---\n%s", again)
+	}
+	extras, ok := decoded.Extras.(CodexExtras)
+	if !ok || extras.ResetCredits.Value == nil || len(extras.ResetCredits.Value.Credits) != 2 || extras.Subscription.Value == nil {
+		t.Fatalf("decoded extras = %+v", decoded.Extras)
+	}
+	classes := windowsByClass(decoded.RoutingWindows(time.Date(2026, 10, 19, 17, 0, 0, 0, time.UTC)))
+	if classes["codex:5h"].UsedPercent != 12 || classes["codex:weekly"].UsedPercent != 48.5 {
+		t.Fatalf("routing windows = %+v", classes)
+	}
+}
+
 func TestQuotaSnapshotLegacyRestore(t *testing.T) {
 	records, err := readCooldownStateFile(context.Background(), filepath.Join("testdata", "legacy_claude.cds"))
 	if err != nil {

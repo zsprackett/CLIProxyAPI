@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,23 +20,28 @@ const (
 )
 
 // PollQuota fetches a Grok CLI credential's billing usage without consuming
-// quota and reports it as x-xai-billing-* headers. Credentials on the official
+// quota and reports it as a poll observation. Credentials on the official
 // API path (API keys) have no billing endpoint and are skipped.
-func (e *XAIExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth) (http.Header, error) {
+func (e *XAIExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth, _ cliproxyauth.PollTrigger) (cliproxyauth.QuotaObservation, error) {
 	if e == nil || auth == nil || xaiUsingAPI(auth) {
-		return nil, nil
+		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
 	if token, _ := xaiCreds(auth); strings.TrimSpace(token) == "" {
-		return nil, nil
+		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
 	weekly, errWeekly := e.fetchXAIBilling(ctx, auth, xaiBillingWeeklyURL)
 	if errWeekly != nil {
 		// The monthly payload carries no weekly usage, so falling back to it
 		// would replace the last weekly snapshot with an empty monthly window.
-		return nil, errWeekly
+		return cliproxyauth.QuotaObservation{}, errWeekly
 	}
 	monthly, _ := e.fetchXAIBilling(ctx, auth, xaiBillingMonthlyURL)
-	return helps.XAIBillingQuotaHeaders(weekly, monthly, time.Now()), nil
+	now := time.Now()
+	obs, ok := cliproxyauth.XAIBillingPollObservation(helps.XAIBillingQuotaHeaders(weekly, monthly, now), now)
+	if !ok {
+		return cliproxyauth.QuotaObservation{}, errors.New("xai billing payloads carry no billing period")
+	}
+	return obs, nil
 }
 
 func (e *XAIExecutor) fetchXAIBilling(ctx context.Context, auth *cliproxyauth.Auth, url string) ([]byte, error) {
@@ -71,9 +77,9 @@ func (e *XAIExecutor) fetchXAIBilling(ctx context.Context, auth *cliproxyauth.Au
 }
 
 // PollQuota delegates quota polling to the HTTP executor.
-func (e *XAIAutoExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth) (http.Header, error) {
+func (e *XAIAutoExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth, trigger cliproxyauth.PollTrigger) (cliproxyauth.QuotaObservation, error) {
 	if e == nil || e.httpExec == nil {
-		return nil, nil
+		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
-	return e.httpExec.PollQuota(ctx, auth)
+	return e.httpExec.PollQuota(ctx, auth, trigger)
 }
