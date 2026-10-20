@@ -25,7 +25,7 @@ import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
 import { maskIdentity } from '../ledgerModel';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
-import { SnapshotBody } from '../providers/snapshotBodies';
+import { SnapshotBody } from '../providers/SnapshotBody';
 import { readQuotaSnapshot } from '../snapshot/windows';
 import bodyStyles from './QuotaBody.module.scss';
 import styles from './QuotaCard.module.scss';

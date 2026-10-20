@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import i18n from '@/i18n';
-import { SnapshotBody } from '@/features/quota/providers/snapshotBodies';
+import { SnapshotBody } from '@/features/quota/providers/SnapshotBody';
 import type { QuotaExtras, QuotaSnapshot } from '@/features/quota/snapshot/types';
 import { QUOTA_CLASS_KEYS, bindQuotaClasses } from '@/features/quota/types';
 import { formatInstantShort } from '@/utils/quota';

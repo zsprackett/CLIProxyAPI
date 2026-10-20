@@ -20,7 +20,7 @@ import {
 } from '@/features/quota/snapshot/windows';
 import { useNow } from '@/hooks/useNow';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '@/features/quota/providers';
-import { SnapshotBody } from '@/features/quota/providers/snapshotBodies';
+import { SnapshotBody } from '@/features/quota/providers/SnapshotBody';
 import styles from './AuthFileQuota.module.scss';
 
 /** Compact quota classes of the auth-file card; a missing class key throws at module load. */

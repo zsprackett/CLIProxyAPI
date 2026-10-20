@@ -4,7 +4,7 @@
  * The page uses the type-erased QuotaAdapter view (the same narrow-interface
  * cast as AuthFileQuotaSection); each data module exports the strong types.
  * Claude and Codex have no live body: their card renders the snapshot through
- * SNAPSHOT_ADAPTERS in snapshotBodies.tsx.
+ * SNAPSHOT_ADAPTERS in snapshotAdapters.ts.
  */
 
 import type { ComponentType } from 'react';
