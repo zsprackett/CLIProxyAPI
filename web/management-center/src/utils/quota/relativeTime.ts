@@ -99,8 +99,7 @@ export interface ResetDisplay {
  * Pair an already-formatted absolute label with a freshly computed relative one.
  *
  * The absolute label wins when present because providers bake it at fetch time
- * and some of them cannot be reproduced at render (`formatCodexResetLabel`
- * resolves `reset_after_seconds` against the fetch-time clock). The instant is
+ * and some of them cannot be reproduced at render. The instant is
  * only used for the relative half, and its absence degrades to exactly the
  * pre-existing rendering — which is what a store entry cached by an older
  * build, with no `resetAtMs` field, will hit.

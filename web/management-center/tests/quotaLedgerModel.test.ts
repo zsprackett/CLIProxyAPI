@@ -276,73 +276,67 @@ describe('observed xAI quota', () => {
 });
 
 describe('resolveLedgerRow', () => {
-  const file = claudeFile(snapshot('claude', [snapWindow({ used_percent: 50 })]));
+  const devinFile = (quotaSnapshot: QuotaSnapshot): AuthFileItem => ({
+    name: 'devin-a.json',
+    type: 'devin',
+    quota_snapshot: quotaSnapshot,
+  });
+  const devinWindow = (overrides: Partial<QuotaWindow>) =>
+    snapWindow({ id: 'weekly', class: 'devin:weekly', section: 'devin.status', ...overrides });
+  const file = devinFile(snapshot('devin', [devinWindow({ used_percent: 50 })]));
+  const liveTwoWindows = (fetchedAtMs?: number) => ({
+    status: 'success',
+    fetchedAtMs,
+    windows: [
+      { id: 'weekly', remainingPercent: 90, resetAtMs: NOW + DAY, periodHours: 168 },
+      { id: 'daily', remainingPercent: 70, resetAtMs: NOW + HOUR, periodHours: 24 },
+    ],
+  });
 
   test('prefers a loaded live reading over the observed snapshot', () => {
-    const row = resolveLedgerRow(
-      'claude',
-      file,
-      {
-        status: 'success',
-        planType: 'plan_max',
-        windows: [{ id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 }],
-      },
-      NOW
-    );
+    const row = resolveLedgerRow('devin', file, liveTwoWindows(), NOW);
     expect(row.source).toBe('live');
-    expect(row.planType).toBe('plan_max');
     expect(row.windows[0].remaining).toBe(90);
   });
 
   test('falls back to the observed snapshot while live data is not loaded', () => {
-    expect(resolveLedgerRow('claude', file, { status: 'error', windows: [] }, NOW).source).toBe(
+    expect(resolveLedgerRow('devin', file, { status: 'error', windows: [] }, NOW).source).toBe(
       'observed'
     );
-    expect(resolveLedgerRow('claude', file, undefined, NOW).windows[0].remaining).toBe(50);
-  });
-
-  const liveTwoWindows = (fetchedAtMs: number) => ({
-    status: 'success',
-    planType: 'plan_max',
-    fetchedAtMs,
-    windows: [
-      { id: 'seven-day', usedPercent: 10, resetAtMs: NOW + DAY, periodHours: 168 },
-      { id: 'seven-day-opus', usedPercent: 30, resetAtMs: NOW + DAY, periodHours: 168 },
-    ],
-  });
-
-  const newerSnapshotFile = claudeFile({
-    ...snapshot('claude', [snapWindow({ used_percent: 50, observed_at: iso(NOW - 3 * HOUR) })], {
-      kind: 'claude',
-      plan: planSection('plan_pro'),
-      extra_usage: absent,
-    }),
-    updated_at: iso(NOW - HOUR),
+    expect(resolveLedgerRow('devin', file, undefined, NOW).windows[0].remaining).toBe(50);
   });
 
   test('a snapshot updated after the live fetch replaces the whole live reading', () => {
-    const leaked = resolveLedgerRow('claude', file, liveTwoWindows(NOW - 2 * HOUR), NOW);
-    expect(leaked.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
-
-    const row = resolveLedgerRow('claude', newerSnapshotFile, liveTwoWindows(NOW - 2 * HOUR), NOW);
+    const newerSnapshotFile = devinFile({
+      ...snapshot('devin', [devinWindow({ used_percent: 50, observed_at: iso(NOW - 3 * HOUR) })]),
+      updated_at: iso(NOW - HOUR),
+    });
+    const row = resolveLedgerRow('devin', newerSnapshotFile, liveTwoWindows(NOW - 2 * HOUR), NOW);
     expect(row.source).toBe('observed');
-    expect(row.planType).toBe('plan_pro');
-    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
+    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([['weekly', 50]]);
   });
 
   test('a live reading fetched after the snapshot update replaces the whole snapshot', () => {
-    const row = resolveLedgerRow(
-      'claude',
-      newerSnapshotFile,
-      liveTwoWindows(NOW - 30 * 60 * 1000),
-      NOW
-    );
+    const row = resolveLedgerRow('devin', file, liveTwoWindows(NOW - 30 * 60 * 1000), NOW);
     expect(row.source).toBe('live');
-    expect(row.planType).toBe('plan_max');
     expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([
-      ['seven-day', 90],
-      ['seven-day-opus', 70],
+      ['weekly', 90],
+      ['daily', 70],
     ]);
+  });
+
+  test('a Claude row shows the snapshot plan', () => {
+    const claude = claudeFile(
+      snapshot('claude', [snapWindow({ used_percent: 50 })], {
+        kind: 'claude',
+        plan: planSection('plan_pro'),
+        extra_usage: absent,
+      })
+    );
+    const row = resolveLedgerRow('claude', claude, { status: 'idle' }, NOW);
+    expect(row.source).toBe('observed');
+    expect(row.planType).toBe('plan_pro');
+    expect(row.windows.map((w) => [w.id, w.remaining])).toEqual([['seven_day', 50]]);
   });
 
   test('reports nothing for providers without data', () => {

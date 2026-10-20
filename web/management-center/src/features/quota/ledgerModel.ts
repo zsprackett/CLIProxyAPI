@@ -4,11 +4,12 @@
  * Pure and React-free (`nowMs` is always passed in) so it is directly testable.
  *
  * Two sources feed a row:
- * - live: the provider state fetched on demand through the api-call proxy;
+ * - live: the provider state fetched on demand through the api-call proxy
+ *   (antigravity, kimi, meta, and until P3 xAI and Devin);
  * - observed: the typed `quota_snapshot` the backend keeps per credential for
  *   Claude, Codex, xAI, and Devin, from its quota poll and from response
- *   headers. The backend already merged its windows. It costs no upstream
- *   request here, so rows have data before anyone clicks refresh.
+ *   headers. The backend already merged its windows. A Claude or Codex click
+ *   polls the backend and its result stands in for the listing snapshot.
  *
  * A row shows one whole reading, never a merge: `newerQuotaReading` picks the
  * live state or the snapshot.
@@ -88,16 +89,6 @@ interface UsedPercentWindowLike {
   periodHours?: number | null;
 }
 
-const fromUsedPercent = (window: UsedPercentWindowLike, index: number): LedgerWindow => ({
-  id: window.id || `window-${index}`,
-  label: window.label,
-  labelKey: window.labelKey,
-  labelParams: window.labelParams,
-  remaining: remainingFromUsed(window.usedPercent),
-  resetAtMs: isFiniteNumber(window.resetAtMs) ? window.resetAtMs : null,
-  periodHours: isFiniteNumber(window.periodHours) ? window.periodHours : null,
-});
-
 /** Windows from a loaded provider state, or null when the state is not loaded. */
 export function liveLedgerWindows(
   provider: QuotaProviderType,
@@ -105,11 +96,6 @@ export function liveLedgerWindows(
 ): LedgerWindow[] | null {
   const state = toRecord(quota);
   if (!state || state.status !== 'success') return null;
-
-  if (provider === 'claude' || provider === 'codex') {
-    const windows = (state.windows as UsedPercentWindowLike[] | undefined) ?? [];
-    return windows.map(fromUsedPercent);
-  }
 
   if (provider === 'devin') {
     const windows =
@@ -207,16 +193,6 @@ export function liveLedgerWindows(
   }
 
   return [];
-}
-
-/** Plan identifier from a loaded provider state, when it reports one. */
-export function livePlanType(provider: QuotaProviderType, quota: unknown): string | null {
-  const state = toRecord(quota);
-  if (!state || state.status !== 'success') return null;
-  if (provider === 'claude' || provider === 'codex') {
-    return typeof state.planType === 'string' && state.planType ? state.planType : null;
-  }
-  return null;
 }
 
 /* ----------------------------------------------------------- quota snapshot */
@@ -318,7 +294,7 @@ export function resolveLedgerRow(
       windows: (liveLedgerWindows(provider, quota) ?? []).map((window) =>
         settleWindow(window, nowMs)
       ),
-      planType: livePlanType(provider, quota),
+      planType: null,
       observedAtMs: null,
     };
   }

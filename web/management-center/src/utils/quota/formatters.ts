@@ -3,8 +3,6 @@
  */
 
 import type { TFunction } from 'i18next';
-import type { CodexUsageWindow } from '@/types';
-import { normalizeNumberValue } from './parsers';
 import { formatInstantShort } from './relativeTime';
 
 export function formatQuotaResetTime(value?: string): string {
@@ -19,20 +17,6 @@ export function formatUnixSeconds(value: number | null): string {
   const ms = value * 1000;
   if (Number.isNaN(ms)) return '-';
   return formatInstantShort(ms);
-}
-
-export function formatCodexResetLabel(window?: CodexUsageWindow | null): string {
-  if (!window) return '-';
-  const resetAt = normalizeNumberValue(window.reset_at ?? window.resetAt);
-  if (resetAt !== null && resetAt > 0) {
-    return formatUnixSeconds(resetAt);
-  }
-  const resetAfter = normalizeNumberValue(window.reset_after_seconds ?? window.resetAfterSeconds);
-  if (resetAfter !== null && resetAfter > 0) {
-    const targetSeconds = Math.floor(Date.now() / 1000 + resetAfter);
-    return formatUnixSeconds(targetSeconds);
-  }
-  return '-';
 }
 
 export function createStatusError(message: string, status?: number): Error & { status?: number } {

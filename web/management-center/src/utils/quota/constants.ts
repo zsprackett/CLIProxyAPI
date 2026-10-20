@@ -104,11 +104,7 @@ export const ANTIGRAVITY_REQUEST_HEADERS = {
   'User-Agent': ANTIGRAVITY_USER_AGENT,
 };
 
-// Claude API configuration
-export const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
-
-export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-
+// Claude API configuration (reset grants)
 export const CLAUDE_REQUEST_HEADERS = {
   'User-Agent': 'claude-cli/2.1.280 (external, cli)',
   Authorization: 'Bearer $TOKEN$',
@@ -116,25 +112,7 @@ export const CLAUDE_REQUEST_HEADERS = {
   'anthropic-beta': 'oauth-2025-04-20',
 };
 
-export const CLAUDE_USAGE_WINDOW_KEYS = [
-  { key: 'five_hour', id: 'five-hour', labelKey: 'claude_quota.five_hour' },
-  { key: 'seven_day', id: 'seven-day', labelKey: 'claude_quota.seven_day' },
-  {
-    key: 'seven_day_oauth_apps',
-    id: 'seven-day-oauth-apps',
-    labelKey: 'claude_quota.seven_day_oauth_apps',
-  },
-  { key: 'seven_day_opus', id: 'seven-day-opus', labelKey: 'claude_quota.seven_day_opus' },
-  { key: 'seven_day_sonnet', id: 'seven-day-sonnet', labelKey: 'claude_quota.seven_day_sonnet' },
-  { key: 'seven_day_cowork', id: 'seven-day-cowork', labelKey: 'claude_quota.seven_day_cowork' },
-  { key: 'iguana_necktie', id: 'seven-day-fable', labelKey: 'claude_quota.seven_day_fable' },
-] as const;
-
-// Codex API configuration
-export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-export const CODEX_SUBSCRIPTION_URL = 'https://chatgpt.com/backend-api/subscriptions';
-export const CODEX_RATE_LIMIT_RESET_CREDITS_URL =
-  'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+// Codex API configuration (the reset-credit write)
 export const CODEX_RATE_LIMIT_RESET_CREDITS_CONSUME_URL =
   'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume';
 
