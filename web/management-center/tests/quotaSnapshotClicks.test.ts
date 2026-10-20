@@ -111,6 +111,9 @@ const renderQuotaPageCard = (file: AuthFileItem) => {
   );
 };
 
+const toasts = () =>
+  useNotificationStore.getState().notifications.map((note) => [note.type, note.message]);
+
 // renderToStaticMarkup reads zustand's server snapshot, which is the store's initial state.
 const serverState = useQuotaStore.getInitialState();
 
@@ -202,5 +205,97 @@ describe('a failed click on the quota page', () => {
     useQuotaStore.getState().reconcileQuotaSnapshots([claudeFile()]);
 
     expect(renderQuotaPageCard(claudeFile())).toContain('Failed to load quota: upstream timeout');
+  });
+});
+
+describe('the answer to a click on the quota page', () => {
+  const usageError = 'fetch /api/oauth/usage failed with status 429';
+
+  /** The backend's 200 when the usage request failed: the old windows stay, marked by the error. */
+  const failedUsagePoll = (): QuotaSnapshot => {
+    const at = iso(Date.now());
+    return {
+      ...claudeGolden,
+      extras: {
+        kind: 'claude',
+        plan: { status: 'ok', value: 'plan_max', value_at: at, checked_at: at },
+        extra_usage: {
+          status: 'failed',
+          value: null,
+          value_at: null,
+          checked_at: at,
+          error: usageError,
+        },
+      },
+      last_poll: { at, trigger: 'on_demand', error: usageError },
+      updated_at: at,
+    };
+  };
+
+  test('a clean poll shows the windows and a success toast', async () => {
+    await clickLoadQuota(claudeFile());
+
+    const card = renderQuotaPageCard(claudeFile());
+    expect(card).toContain('7-day limit');
+    expect(card).not.toContain('Stale since');
+    expect(card).not.toContain('Last quota poll failed');
+    expect(toasts()).toEqual([['success', 'Quota refreshed for "claude-a.json"']]);
+  });
+
+  test('a 200 with a failed usage request shows stale windows, the failure, and no success toast', async () => {
+    answerWith(200, { quota_snapshot: failedUsagePoll() });
+
+    await clickLoadQuota(claudeFile());
+
+    const card = renderQuotaPageCard(claudeFile());
+    expect(card).toContain('7-day limit');
+    expect(card).toContain('Stale since');
+    expect(card).toContain(`Last quota poll failed: ${usageError}`);
+    const section = renderAuthFileSection(claudeFile());
+    expect(section).toContain('Stale since');
+    expect(section).toContain(`Last quota poll failed: ${usageError}`);
+    expect(toasts()).toEqual([
+      ['error', `Failed to refresh quota for "claude-a.json": ${usageError}`],
+    ]);
+  });
+
+  test('a 404 asks the user to update CPA', async () => {
+    answerWith(404, { error: 'auth not found' });
+
+    await clickLoadQuota(claudeFile());
+
+    expect(renderQuotaPageCard(claudeFile())).toContain(
+      'Failed to load quota: Please update the CPA version or check for updates'
+    );
+  });
+
+  test('a 422 shows the backend reason', async () => {
+    answerWith(422, { error: 'credential has no quota to poll' });
+
+    await clickLoadQuota(claudeFile());
+
+    expect(renderQuotaPageCard(claudeFile())).toContain(
+      'Failed to load quota: credential has no quota to poll'
+    );
+  });
+
+  test('a second click while the first is in flight sends no second request', async () => {
+    let arrived: () => void = () => {};
+    const requested = new Promise<void>((resolve) => (arrived = resolve));
+    let release: () => void = () => {};
+    answer = () =>
+      new Promise<Answer>((resolve) => {
+        release = () => resolve({ status: 200, data: { quota_snapshot: claudeGolden } });
+        arrived();
+      });
+
+    const first = clickLoadQuota(claudeFile());
+    const second = clickLoadQuota(claudeFile());
+    await requested;
+    release();
+    await Promise.all([first, second]);
+
+    expect(requests).toEqual([['/credentials/quota/poll', { auth_index: 'idx-a' }]]);
+    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="codexPlanValue">Max</span>');
   });
 });
