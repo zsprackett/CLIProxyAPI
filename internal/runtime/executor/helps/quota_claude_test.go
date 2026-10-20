@@ -213,6 +213,11 @@ func TestClaudePlanType(t *testing.T) {
 		"pro":                 {claudeProfile("", "", false, true), "plan_pro"},
 		"free":                {claudeProfile("", "", false, false), "plan_free"},
 		"string flags":        {claudeProfile("", "", "false", "true"), "plan_pro"},
+		"yes no flags":        {claudeProfile("", "", "no", "yes"), "plan_pro"},
+		"digit flags":         {claudeProfile("", "", "1", "0"), "plan_max"},
+		"on off flags":        {claudeProfile("", "", "off", "off"), "plan_free"},
+		"y n flags":           {claudeProfile("", "", "n", "y"), "plan_pro"},
+		"other string":        {claudeProfile("", "", "maybe", "true"), "plan_pro"},
 		"unknown flags":       {claudeProfile("", "", nil, nil), ""},
 		"one unknown is open": {claudeProfile("", "", false, nil), ""},
 	}
