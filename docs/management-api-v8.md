@@ -101,6 +101,7 @@ retain the corresponding business operation's fields.
 | `/credentials/status` | PATCH | Change credential status. |
 | `/credentials/fields` | PATCH | Change credential fields. |
 | `/credentials/refresh` | POST | Refresh credentials. |
+| `/credentials/quota/poll` | POST | Poll one credential's quota upstream now. Body `{"auth_index": "<auth_index>"}`. Returns `{"quota_snapshot": ...}` in the shape of the `quota_snapshot` field of `GET /credentials`; an upstream failure is a 200 whose `last_poll.error` is set and whose windows keep the last good data. 404 for an unknown `auth_index`, 422 for a credential that has nothing to poll (API key, setup token, unsupported provider), 409 in Home mode. The poll joins a background poll of the same credential that is already in flight and defers the next background poll by one interval. |
 | `/oauth/import?provider=vertex` | POST | Import a Vertex service account using a multipart `file` upload. |
 | `/oauth/auth-url?provider=<provider>` | GET | Start built-in or plugin OAuth. |
 | `/oauth/status?state=<state>` | GET | Get login status. |
