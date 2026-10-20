@@ -37,11 +37,23 @@ const claudeGolden: QuotaSnapshot = JSON.parse(
   )
 );
 
+const MINUTE = 60 * 1000;
+const iso = (ms: number) => new Date(ms).toISOString();
+
 const claudeFile = (quotaSnapshot?: QuotaSnapshot): AuthFileItem => ({
   name: 'claude-a.json',
   type: 'claude',
   auth_index: 'idx-a',
   ...(quotaSnapshot ? { quota_snapshot: quotaSnapshot } : {}),
+});
+
+/** A listing snapshot with the 7-day window at 90% used, so 10% shows. */
+const listedReading = (updatedAt: string): QuotaSnapshot => ({
+  ...claudeGolden,
+  windows: claudeGolden.windows.map((window) =>
+    window.id === 'seven_day' ? { ...window, used_percent: 90, observed_at: updatedAt } : window
+  ),
+  updated_at: updatedAt,
 });
 
 type Answer = { status: number; data: unknown };
@@ -152,5 +164,43 @@ describe('a credential re-added at the same path', () => {
     invalidateAuthFileDerivedCaches(() => {}, ['claude-other.json']);
 
     expect(renderQuotaPageCard(claudeFile())).toContain('<span class="codexPlanValue">Max</span>');
+  });
+});
+
+describe('a failed click on the quota page', () => {
+  const failClick = async () => {
+    answerWith(500, { error: 'upstream timeout' });
+    await clickLoadQuota(claudeFile());
+  };
+
+  test('gives way to a listing snapshot newer than the click', async () => {
+    await failClick();
+    const listed = claudeFile(listedReading(iso(Date.now() + MINUTE)));
+    expect(renderQuotaPageCard(listed)).toContain('Failed to load quota: upstream timeout');
+
+    useQuotaStore.getState().reconcileQuotaSnapshots([listed]);
+
+    const card = renderQuotaPageCard(listed);
+    expect(card).not.toContain('role="alert"');
+    expect(card).toContain('<span class="windowPercent">10%</span>');
+  });
+
+  test('stays over a listing snapshot older than the click', async () => {
+    await failClick();
+    const listed = claudeFile(listedReading(iso(Date.now() - MINUTE)));
+
+    useQuotaStore.getState().reconcileQuotaSnapshots([listed]);
+
+    const card = renderQuotaPageCard(listed);
+    expect(card).toContain('role="alert"');
+    expect(card).toContain('Failed to load quota: upstream timeout');
+  });
+
+  test('stays while the listing has no snapshot', async () => {
+    await failClick();
+
+    useQuotaStore.getState().reconcileQuotaSnapshots([claudeFile()]);
+
+    expect(renderQuotaPageCard(claudeFile())).toContain('Failed to load quota: upstream timeout');
   });
 });
