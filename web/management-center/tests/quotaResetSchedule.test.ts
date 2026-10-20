@@ -11,41 +11,92 @@ import {
   pickUrgentRowId,
   resetCreditRowId,
 } from '@/features/quota/resetSchedule';
+import type { CodexResetCredit, QuotaSnapshot } from '@/features/quota/snapshot/types';
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
 
 const NOW = new Date(2026, 7, 2, 12).getTime();
 const iso = (ms: number) => new Date(ms).toISOString();
 
-const claudeQuota = {
-  status: 'success',
-  windows: [
-    { id: 'five_hour', resetAtMs: NOW + 3 * HOUR_MS },
-    { id: 'seven_day', resetAtMs: NOW + 4 * DAY_MS },
-  ],
-};
+const section = <T>(value: T) => ({
+  status: 'ok' as const,
+  value,
+  value_at: null,
+  checked_at: null,
+});
 
-const codexQuota = {
-  status: 'success',
-  windows: [
-    { id: 'primary', resetAtMs: NOW + 3 * HOUR_MS },
-    { id: 'secondary', resetAtMs: NOW + 6 * DAY_MS },
+/** A snapshot with windows `[id, reset_at]` and, for Codex, reset credits. */
+const snapshot = (
+  provider: 'claude' | 'codex',
+  windows: [string, string | null][],
+  credits: CodexResetCredit[] = []
+): QuotaSnapshot => ({
+  provider,
+  windows: windows.map(([id, resetAt]) => ({
+    id,
+    class: '',
+    used_percent: 10,
+    limit_reached: false,
+    reset_at: resetAt,
+    period_seconds: null,
+    section: `${provider}.usage`,
+    source: 'poll',
+    observed_at: iso(NOW),
+  })),
+  extras:
+    provider === 'codex'
+      ? {
+          kind: 'codex',
+          plan: section('plus'),
+          access: section({ allowed: true, limit_reached: false }),
+          credits: section({ has_credits: null, unlimited: null, balance: null }),
+          subscription: section({ active_until: null }),
+          reset_credits: section({
+            available: credits.length,
+            applicable_available: null,
+            credits,
+          }),
+        }
+      : null,
+  last_poll: null,
+  updated_at: iso(NOW),
+});
+
+const credit = (id: string, status: string, expiresAt: string): CodexResetCredit => ({
+  id,
+  status,
+  granted_at: null,
+  expires_at: expiresAt,
+});
+
+const claudeSnapshot = snapshot('claude', [
+  ['five_hour', iso(NOW + 3 * HOUR_MS)],
+  ['seven_day', iso(NOW + 4 * DAY_MS)],
+]);
+
+const codexCredits = [
+  credit('credit-a', 'available', iso(NOW + 11 * DAY_MS)),
+  credit('credit-b', 'available', iso(NOW + 2 * DAY_MS)),
+];
+
+const codexSnapshot = snapshot(
+  'codex',
+  [
+    ['primary', iso(NOW + 3 * HOUR_MS)],
+    ['secondary', iso(NOW + 6 * DAY_MS)],
   ],
-  rateLimitResetCredits: [
-    { id: 'credit-a', status: 'available', expiresAt: iso(NOW + 11 * DAY_MS) },
-    { id: 'credit-b', status: 'available', expiresAt: iso(NOW + 2 * DAY_MS) },
-  ],
-};
+  codexCredits
+);
 
 describe('collectQuotaRowInstants', () => {
   test('collects every Claude window', () => {
-    expect(collectQuotaRowInstants('claude', claudeQuota)).toEqual([
+    expect(collectQuotaRowInstants('claude', undefined, claudeSnapshot)).toEqual([
       { rowId: 'five_hour', atMs: NOW + 3 * HOUR_MS, kind: 'window' },
       { rowId: 'seven_day', atMs: NOW + 4 * DAY_MS, kind: 'window' },
     ]);
   });
 
   test('collects Codex windows and available reset credits together', () => {
-    const instants = collectQuotaRowInstants('codex', codexQuota);
+    const instants = collectQuotaRowInstants('codex', undefined, codexSnapshot);
     expect(instants).toHaveLength(4);
     expect(instants.filter((i) => i.kind === 'credit').map((i) => i.rowId)).toEqual([
       'credit-a',
@@ -54,15 +105,16 @@ describe('collectQuotaRowInstants', () => {
   });
 
   test('ignores reset credits that are not available', () => {
-    const consumed = {
-      ...codexQuota,
-      rateLimitResetCredits: [
-        { id: 'used', status: 'consumed', expiresAt: iso(NOW + HOUR_MS) },
-        { id: 'live', status: 'available', expiresAt: iso(NOW + 2 * HOUR_MS) },
-      ],
-    };
+    const consumed = snapshot(
+      'codex',
+      [],
+      [
+        credit('used', 'consumed', iso(NOW + HOUR_MS)),
+        credit('live', 'available', iso(NOW + 2 * HOUR_MS)),
+      ]
+    );
     expect(
-      collectQuotaRowInstants('codex', consumed)
+      collectQuotaRowInstants('codex', undefined, consumed)
         .filter((i) => i.kind === 'credit')
         .map((i) => i.rowId)
     ).toEqual(['live']);
@@ -99,51 +151,47 @@ describe('collectQuotaRowInstants', () => {
     expect(collectQuotaRowInstants('kimi', quota).map((i) => i.rowId)).toEqual(['r1']);
   });
 
-  test('returns nothing unless the credential loaded successfully', () => {
+  test('returns nothing without a snapshot or a loaded live state', () => {
     for (const status of ['idle', 'loading', 'error']) {
-      expect(collectQuotaRowInstants('claude', { ...claudeQuota, status })).toEqual([]);
+      expect(collectQuotaRowInstants('kimi', { status, rows: [] })).toEqual([]);
     }
     expect(collectQuotaRowInstants('claude', undefined)).toEqual([]);
+    expect(collectQuotaRowInstants('claude', { status: 'idle' }, null)).toEqual([]);
   });
 
   test('drops rows with no usable instant rather than emitting NaN', () => {
-    const quota = {
-      status: 'success',
-      windows: [
-        { id: 'ok', resetAtMs: NOW + HOUR_MS },
-        { id: 'missing' },
-        { id: 'null', resetAtMs: null },
-        { id: 'nan', resetAtMs: Number.NaN },
-      ],
-    };
-    expect(collectQuotaRowInstants('claude', quota).map((i) => i.rowId)).toEqual(['ok']);
+    const quota = snapshot('claude', [
+      ['ok', iso(NOW + HOUR_MS)],
+      ['null', null],
+      ['garbage', 'not a date'],
+    ]);
+    expect(collectQuotaRowInstants('claude', undefined, quota).map((i) => i.rowId)).toEqual(['ok']);
   });
 
   test('drops a reset credit whose expiry will not parse', () => {
-    const quota = {
-      status: 'success',
-      windows: [],
-      rateLimitResetCredits: [{ id: 'bad', status: 'available', expiresAt: 'not a date' }],
-    };
-    expect(collectQuotaRowInstants('codex', quota)).toEqual([]);
+    const quota = snapshot('codex', [], [credit('bad', 'available', 'not a date')]);
+    expect(collectQuotaRowInstants('codex', undefined, quota)).toEqual([]);
   });
 });
 
 describe('pickSoonestRowId', () => {
   test('picks the nearest upcoming instant', () => {
-    expect(pickSoonestRowId(collectQuotaRowInstants('claude', claudeQuota), NOW)).toBe('five_hour');
+    expect(
+      pickSoonestRowId(collectQuotaRowInstants('claude', undefined, claudeSnapshot), NOW)
+    ).toBe('five_hour');
   });
 
   test('a credit expiring before every window wins the emphasis', () => {
-    const quota = {
-      ...codexQuota,
-      windows: [{ id: 'primary', resetAtMs: NOW + 5 * DAY_MS }],
-    };
-    expect(pickSoonestRowId(collectQuotaRowInstants('codex', quota), NOW)).toBe('credit-b');
+    const quota = snapshot('codex', [['primary', iso(NOW + 5 * DAY_MS)]], codexCredits);
+    expect(pickSoonestRowId(collectQuotaRowInstants('codex', undefined, quota), NOW)).toBe(
+      'credit-b'
+    );
   });
 
   test('a window resetting before every credit wins the emphasis', () => {
-    expect(pickSoonestRowId(collectQuotaRowInstants('codex', codexQuota), NOW)).toBe('primary');
+    expect(pickSoonestRowId(collectQuotaRowInstants('codex', undefined, codexSnapshot), NOW)).toBe(
+      'primary'
+    );
   });
 
   test('skips instants that have already passed', () => {
@@ -196,15 +244,15 @@ describe('pickUrgentRowId', () => {
 
 describe('resetCreditRowId', () => {
   test('prefers the credit id', () => {
-    expect(resetCreditRowId({ id: 'credit-a', expiresAt: 'x' }, 3)).toBe('credit-a');
+    expect(resetCreditRowId({ id: 'credit-a', expires_at: 'x' }, 3)).toBe('credit-a');
   });
 
   test('falls back to expiry and index when the payload carries no id', () => {
     // Must stay byte-identical to CodexQuotaBody's React key.
-    expect(resetCreditRowId({ id: '', expiresAt: '2026-08-13T00:00:00Z' }, 2)).toBe(
+    expect(resetCreditRowId({ id: '', expires_at: '2026-08-13T00:00:00Z' }, 2)).toBe(
       '2026-08-13T00:00:00Z-2'
     );
-    expect(resetCreditRowId({ expiresAt: '2026-08-13T00:00:00Z' }, 0)).toBe(
+    expect(resetCreditRowId({ expires_at: '2026-08-13T00:00:00Z' }, 0)).toBe(
       '2026-08-13T00:00:00Z-0'
     );
   });
@@ -212,18 +260,15 @@ describe('resetCreditRowId', () => {
 
 describe('nextRecoveryMs', () => {
   test('returns the soonest upcoming instant across windows and credits', () => {
-    expect(nextRecoveryMs('codex', codexQuota, NOW)).toBe(NOW + 3 * HOUR_MS);
+    expect(nextRecoveryMs('codex', undefined, NOW, codexSnapshot)).toBe(NOW + 3 * HOUR_MS);
   });
 
   test('ignores instants already in the past', () => {
-    const quota = {
-      status: 'success',
-      windows: [
-        { id: 'stale', resetAtMs: NOW - DAY_MS },
-        { id: 'live', resetAtMs: NOW + DAY_MS },
-      ],
-    };
-    expect(nextRecoveryMs('claude', quota, NOW)).toBe(NOW + DAY_MS);
+    const quota = snapshot('claude', [
+      ['stale', iso(NOW - DAY_MS)],
+      ['live', iso(NOW + DAY_MS)],
+    ]);
+    expect(nextRecoveryMs('claude', undefined, NOW, quota)).toBe(NOW + DAY_MS);
   });
 
   test('is null for an unloaded credential, so sorting can sink it', () => {
@@ -233,7 +278,7 @@ describe('nextRecoveryMs', () => {
   });
 
   test('is null when every known instant has passed', () => {
-    const quota = { status: 'success', windows: [{ id: 'stale', resetAtMs: NOW - 1 }] };
-    expect(nextRecoveryMs('claude', quota, NOW)).toBeNull();
+    const quota = snapshot('claude', [['stale', iso(NOW - 1)]]);
+    expect(nextRecoveryMs('claude', undefined, NOW, quota)).toBeNull();
   });
 });

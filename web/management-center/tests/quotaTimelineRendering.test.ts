@@ -4,17 +4,39 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import '../src/i18n/index';
 import { QuotaTimeline } from '../src/features/quota/components/QuotaTimeline';
 import type { QuotaFileEntry } from '../src/features/quota/logic';
+import type { QuotaSnapshot } from '../src/features/quota/snapshot/types';
 import { buildKimiQuotaRows } from '../src/utils/quota';
 
-const entries: QuotaFileEntry[] = [
+/** A Claude snapshot with one 7-day window, 25% used. */
+const weeklyOnlySnapshot: QuotaSnapshot = {
+  provider: 'claude',
+  windows: [
+    {
+      id: 'seven_day',
+      class: 'claude:7d',
+      used_percent: 25,
+      limit_reached: false,
+      reset_at: new Date(2026, 7, 1, 12).toISOString(),
+      period_seconds: 604800,
+      section: 'claude.usage',
+      source: 'poll',
+      observed_at: null,
+    },
+  ],
+  extras: null,
+  last_poll: null,
+  updated_at: null,
+};
+
+const weeklyOnly: QuotaFileEntry[] = [
   {
-    file: { name: 'weekly-only.json', type: 'claude' },
+    file: { name: 'weekly-only.json', type: 'claude', quota_snapshot: weeklyOnlySnapshot },
     type: 'claude',
   },
 ];
 
 const baseProps = {
-  entries,
+  entries: weeklyOnly,
   displayNameFor: (name: string) => name,
   resolvedTheme: 'light' as const,
   now: new Date(2026, 6, 29, 12).getTime(),
@@ -26,17 +48,7 @@ describe('QuotaTimeline rendering', () => {
       createElement(QuotaTimeline, {
         ...baseProps,
         initialOffset: 1,
-        quotaFor: () => ({
-          status: 'success',
-          windows: [
-            {
-              label: '7-day',
-              usedPercent: 25,
-              resetAtMs: new Date(2026, 7, 1, 12).getTime(),
-              periodHours: 168,
-            },
-          ],
-        }),
+        quotaFor: () => undefined,
       })
     );
 
@@ -49,23 +61,11 @@ describe('QuotaTimeline rendering', () => {
   });
 
   test('keeps the panel and controls visible when 5-hour mode has no matching lanes', () => {
-    const weeklyOnlyQuota = {
-      status: 'success' as const,
-      windows: [
-        {
-          label: '7-day',
-          usedPercent: 25,
-          resetAtMs: new Date(2026, 7, 1, 12).getTime(),
-          periodHours: 168,
-        },
-      ],
-    };
-
     const markup = renderToStaticMarkup(
       createElement(QuotaTimeline, {
         ...baseProps,
         initialMode: 'session',
-        quotaFor: () => weeklyOnlyQuota,
+        quotaFor: () => undefined,
       })
     );
 
@@ -114,36 +114,57 @@ describe('QuotaTimeline rendering', () => {
   });
 
   test('renders an unexpired Codex reset credit as an expiry tick', () => {
+    const section = <T>(value: T) => ({
+      status: 'ok' as const,
+      value,
+      value_at: null,
+      checked_at: null,
+    });
+    const codexCreditSnapshot: QuotaSnapshot = {
+      provider: 'codex',
+      windows: [
+        {
+          ...weeklyOnlySnapshot.windows[0],
+          id: 'secondary',
+          class: 'codex:weekly',
+          used_percent: 90,
+          section: 'codex.usage',
+        },
+      ],
+      extras: {
+        kind: 'codex',
+        plan: section('plus'),
+        access: section({ allowed: true, limit_reached: false }),
+        credits: section({ has_credits: null, unlimited: null, balance: null }),
+        subscription: section({ active_until: null }),
+        reset_credits: section({
+          available: 1,
+          applicable_available: 1,
+          credits: [
+            {
+              id: 'credit-1',
+              status: 'available',
+              granted_at: '2026-07-20T12:00:00Z',
+              expires_at: '2026-08-03T12:00:00Z',
+            },
+          ],
+        }),
+      },
+      last_poll: null,
+      updated_at: null,
+    };
     const markup = renderToStaticMarkup(
       createElement(QuotaTimeline, {
         entries: [
           {
-            file: { name: 'codex-credit.json', type: 'codex' },
+            file: { name: 'codex-credit.json', type: 'codex', quota_snapshot: codexCreditSnapshot },
             type: 'codex',
           },
         ],
         displayNameFor: (name: string) => name,
         resolvedTheme: 'light',
         now: new Date(2026, 6, 29, 12).getTime(),
-        quotaFor: () => ({
-          status: 'success',
-          windows: [
-            {
-              label: '7-day',
-              usedPercent: 90,
-              resetAtMs: new Date(2026, 7, 1, 12).getTime(),
-              periodHours: 168,
-            },
-          ],
-          rateLimitResetCredits: [
-            {
-              id: 'credit-1',
-              status: 'available',
-              grantedAt: '2026-07-20T12:00:00Z',
-              expiresAt: '2026-08-03T12:00:00Z',
-            },
-          ],
-        }),
+        quotaFor: () => undefined,
       })
     );
 
@@ -155,6 +176,7 @@ describe('QuotaTimeline rendering', () => {
     const markup = renderToStaticMarkup(
       createElement(QuotaTimeline, {
         ...baseProps,
+        entries: [{ file: { name: 'unloaded.json', type: 'claude' }, type: 'claude' }],
         quotaFor: () => undefined,
       })
     );

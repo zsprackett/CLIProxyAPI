@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  claudePeriodHours,
   parseIsoToMs,
   parseOffsetSecondsToMs,
   parseUnixToMs,
-  periodHoursFromSeconds,
   resolveResetMs,
 } from '../src/utils/quota/resetInstants';
 
@@ -69,33 +67,11 @@ describe('resolveResetMs', () => {
 
   test('prefers an earlier candidate over a later one in the list', () => {
     // Order is priority, not chronology — callers list their preferred key first.
-    expect(resolveResetMs(['2026-01-01T00:00:00Z', 1_754_000_000])).toBe(
-      Date.UTC(2026, 0, 1)
-    );
+    expect(resolveResetMs(['2026-01-01T00:00:00Z', 1_754_000_000])).toBe(Date.UTC(2026, 0, 1));
   });
 
   test('returns null when nothing parses', () => {
     expect(resolveResetMs([])).toBeNull();
     expect(resolveResetMs([undefined, null, '', 'later'])).toBeNull();
-  });
-});
-
-describe('period derivation', () => {
-  test('converts a window length in seconds to hours', () => {
-    expect(periodHoursFromSeconds(18_000)).toBe(5);
-    expect(periodHoursFromSeconds(604_800)).toBe(168);
-    expect(periodHoursFromSeconds('18000')).toBe(5);
-  });
-
-  test('rejects an absent or non-positive window length', () => {
-    expect(periodHoursFromSeconds(0)).toBeNull();
-    expect(periodHoursFromSeconds(undefined)).toBeNull();
-  });
-
-  test('derives the Claude period from its window key', () => {
-    // Claude states the period nowhere in the payload — only the key implies it.
-    expect(claudePeriodHours('five_hour')).toBe(5);
-    expect(claudePeriodHours('seven_day')).toBe(168);
-    expect(claudePeriodHours('seven_day_opus')).toBe(168);
   });
 });

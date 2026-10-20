@@ -7,6 +7,8 @@
  * 初始化时抛错并列出缺失清单，替代旧字符串 styleMap 的静默 class="undefined"。
  */
 
+import type { QuotaExtras, QuotaSnapshot } from './snapshot/types';
+
 export interface QuotaClassMap {
   // 额度行（五个提供商共用）
   quotaRow: string;
@@ -99,4 +101,12 @@ export function bindQuotaClasses(module: Record<string, string>, source: string)
 export interface QuotaBodyProps<TState> {
   quota: TState;
   classes: QuotaClassMap;
+}
+
+/** Props of a body that renders a backend quota snapshot of one provider kind. */
+export interface SnapshotBodyProps<K extends QuotaExtras['kind']> {
+  snapshot: QuotaSnapshot;
+  extras: Extract<QuotaExtras, { kind: K }>;
+  classes: QuotaClassMap;
+  nowMs: number;
 }

@@ -10,6 +10,7 @@
 import { useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconRefreshCw } from '@/components/ui/icons';
+import { useNow } from '@/hooks/useNow';
 import type { ResolvedTheme } from '@/types';
 import { resolveQuotaErrorMessage } from '@/utils/quota';
 import { getQuotaDisplayName } from '@/utils/quota/identity';
@@ -24,6 +25,8 @@ import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
 import { maskIdentity } from '../ledgerModel';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
+import { SnapshotBody } from '../providers/SnapshotBody';
+import { readQuotaSnapshot } from '../snapshot/windows';
 import bodyStyles from './QuotaBody.module.scss';
 import styles from './QuotaCard.module.scss';
 
@@ -57,6 +60,7 @@ export function QuotaCard(props: QuotaCardProps) {
     onReset,
   } = props;
   const { t } = useTranslation();
+  const nowMs = useNow();
   const adapter = QUOTA_ADAPTERS[entry.type];
   const file = entry.file;
   const fullName = getQuotaDisplayName(file);
@@ -69,11 +73,17 @@ export function QuotaCard(props: QuotaCardProps) {
       ? undefined
       : ({ '--card-delay': `${mountEntranceDelayMs}ms` } as CSSProperties);
 
-  const status = quota?.status ?? 'idle';
+  // A snapshot provider has data once the credential has a snapshot; its card
+  // state only tracks the loading and error of a click.
+  const snapshot = adapter.Body ? null : readQuotaSnapshot(entry.type, file.quota_snapshot);
+  const status =
+    quota?.status === 'idle' || !quota ? (snapshot ? 'success' : 'idle') : quota.status;
   const loading = status === 'loading';
+  // Reset grants are read through api-call, so only after a click in this session.
+  const claudeResetVisible = entry.type === 'claude' && quota !== undefined && status !== 'idle';
   const claudeReset = useClaudeResetGrants(
     file,
-    entry.type === 'claude' && status !== 'idle',
+    claudeResetVisible,
     !canRefresh || loading || resetting,
     quota,
     onRefresh
@@ -88,8 +98,8 @@ export function QuotaCard(props: QuotaCardProps) {
   const showReset =
     status === 'success' &&
     Boolean(adapter.resetQuota) &&
-    quota !== undefined &&
-    Boolean(adapter.canResetQuota?.(quota));
+    snapshot !== null &&
+    Boolean(adapter.canResetQuota?.(snapshot));
 
   return (
     <article
@@ -118,7 +128,7 @@ export function QuotaCard(props: QuotaCardProps) {
       </header>
 
       <div className={styles.body}>
-        {entry.type === 'claude' && status === 'success' && (
+        {claudeResetVisible && status === 'success' && (
           <>
             <div className={quotaClasses.codexPlan}>
               <span className={quotaClasses.codexPlanItem}>
@@ -157,7 +167,9 @@ export function QuotaCard(props: QuotaCardProps) {
           <div className={styles.errorStrip} role="alert">
             {t(`${adapter.i18nPrefix}.load_failed`, { message: errorMessage })}
           </div>
-        ) : quota ? (
+        ) : snapshot ? (
+          <SnapshotBody snapshot={snapshot} classes={quotaClasses} nowMs={nowMs} />
+        ) : quota && adapter.Body ? (
           <adapter.Body quota={quota} classes={quotaClasses} />
         ) : (
           <div className={styles.idleHint}>{t(`${adapter.i18nPrefix}.idle`)}</div>
@@ -166,7 +178,7 @@ export function QuotaCard(props: QuotaCardProps) {
 
       {status !== 'idle' && (
         <footer className={styles.actionRow}>
-          {entry.type === 'claude' && (
+          {claudeResetVisible && (
             <button
               type="button"
               className={styles.actionPill}

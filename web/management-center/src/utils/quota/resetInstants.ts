@@ -11,9 +11,6 @@
  * so nothing about the existing rendering changes.
  */
 
-/** Milliseconds in an hour — window periods are expressed in hours throughout. */
-const HOUR_MS = 3_600_000;
-
 /**
  * Parse an ISO-8601 timestamp to epoch ms.
  *
@@ -65,23 +62,4 @@ export function resolveResetMs(candidates: readonly unknown[]): number | null {
     if (unix !== null) return unix;
   }
   return null;
-}
-
-/** Window length in hours from a seconds value, or null when absent/invalid. */
-export function periodHoursFromSeconds(value: unknown): number | null {
-  const numeric =
-    typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN;
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  return (numeric * 1000) / HOUR_MS;
-}
-
-/**
- * Window length implied by a Claude usage key.
- *
- * Claude reports named windows rather than durations — `five_hour` is a rolling
- * 5-hour window, everything else on that payload is a 7-day one. Derived from
- * the key because the payload states the period nowhere else.
- */
-export function claudePeriodHours(windowKey: string): number {
-  return windowKey === 'five_hour' ? 5 : 24 * 7;
 }

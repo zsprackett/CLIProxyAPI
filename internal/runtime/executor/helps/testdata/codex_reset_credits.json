@@ -1,0 +1,9 @@
+{
+  "available_count": 2,
+  "applicable_available_count": 1,
+  "credits": [
+    {"id": "rc_1", "status": "available", "reset_type": "codex_rate_limits", "granted_at": "2026-10-01T00:00:00Z", "expires_at": "2026-12-01T00:00:00Z"},
+    {"id": "rc_2", "status": "available", "reset_type": "codex_rate_limits", "granted_at": "2026-10-05T00:00:00Z", "expires_at": "2026-12-05T00:00:00Z"},
+    {"id": "rc_other", "status": "available", "reset_type": "other_feature", "granted_at": "2026-10-05T00:00:00Z", "expires_at": "2026-12-05T00:00:00Z"}
+  ]
+}

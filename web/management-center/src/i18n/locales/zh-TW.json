@@ -1606,6 +1606,7 @@
     "window_reset_awaiting": "已重置，等待資料",
     "window_limit_reached": "已達上限",
     "window_stale_since": "資料已過期（{{age}}）",
+    "poll_failed": "最近一次額度查詢失敗：{{message}}",
     "window_stale_hint": "該限額最近一次查詢失敗，百分比為最後一次成功讀取的值。",
     "ledger_refresh": "重新整理額度",
     "ledger_load": "載入額度",

@@ -4,7 +4,7 @@ import { apiClient, authFilesApi } from '@/services/api';
 import type { AuthFileRefreshResult } from '@/services/api/authFiles';
 import { getAuthFileRefreshKey } from '@/features/authFiles/manualRefresh';
 import { notifyAuthFilesChanged } from '@/features/authFiles/authFilesEvents';
-import { useNotificationStore } from '@/stores';
+import { useNotificationStore, useQuotaStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import { formatFileSize } from '@/utils/format';
 import { MAX_AUTH_FILE_SIZE } from '@/utils/constants';
@@ -224,8 +224,11 @@ export function useAuthFilesData(options?: UseAuthFilesDataOptions): UseAuthFile
       try {
         const data = await authFilesApi.list();
         if (!isCurrentRequest()) return; // 已被更新的请求/连接/变更取代
-        setFiles(data?.files || []);
+        const listed = data?.files || [];
+        setFiles(listed);
         setError('');
+        // A click error on a credential card gives way to a listing snapshot from after the click.
+        useQuotaStore.getState().reconcileQuotaSnapshots(listed);
       } catch (err: unknown) {
         if (!isCurrentRequest()) return;
         const errorMessage = err instanceof Error ? err.message : t('notification.refresh_failed');

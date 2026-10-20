@@ -4,6 +4,8 @@
  * staleness.
  */
 
+import type { AuthFileItem } from '@/types';
+import { normalizeAuthIndex } from '@/utils/authIndex';
 import type {
   QuotaExtras,
   QuotaProviderKind,
@@ -66,6 +68,47 @@ export function newerQuotaReading(
   const updatedAtMs = Date.parse(snapshot.updated_at ?? '');
   const fetchedAtMs = live.fetchedAtMs;
   return typeof fetchedAtMs === 'number' && updatedAtMs > fetchedAtMs ? 'snapshot' : 'live';
+}
+
+const updatedAtMs = (value: unknown): number =>
+  isRecord(value) && typeof value.updated_at === 'string' ? Date.parse(value.updated_at) : NaN;
+
+/** The listing caught up with a poll result once its snapshot is at least as new. */
+export function listingCaughtUp(polled: QuotaSnapshot, listed: unknown): boolean {
+  const listedMs = updatedAtMs(listed);
+  if (!Number.isFinite(listedMs)) return false;
+  const polledMs = updatedAtMs(polled);
+  return !Number.isFinite(polledMs) || listedMs >= polledMs;
+}
+
+/** Whether the listing snapshot was updated after `atMs`; false when it has no snapshot. */
+export function listingUpdatedAfter(listed: unknown, atMs: number): boolean {
+  return updatedAtMs(listed) > atMs;
+}
+
+/** The credential's auth index as the listing and the poll endpoint name it. */
+export const fileAuthIndex = (file: AuthFileItem): string | null =>
+  normalizeAuthIndex(file.auth_index ?? file.authIndex);
+
+/** An on-demand poll result and the auth file it was polled for. */
+export interface PolledQuotaSnapshot {
+  name: string;
+  snapshot: QuotaSnapshot;
+}
+
+/**
+ * The listing entry with its on-demand poll result in place of `quota_snapshot`,
+ * until the listing carries a snapshot at least as new. The same object
+ * otherwise.
+ */
+export function applyPolledSnapshot(
+  file: AuthFileItem,
+  polled: Readonly<Record<string, PolledQuotaSnapshot>>
+): AuthFileItem {
+  const authIndex = fileAuthIndex(file);
+  const snapshot = authIndex ? polled[authIndex]?.snapshot : undefined;
+  if (!snapshot || listingCaughtUp(snapshot, file.quota_snapshot)) return file;
+  return { ...file, quota_snapshot: snapshot };
 }
 
 const SECTION_STATUS: Record<string, (extras: QuotaExtras) => SectionStatus | undefined> = {

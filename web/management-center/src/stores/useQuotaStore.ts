@@ -3,14 +3,21 @@
  */
 
 import { create } from 'zustand';
-import { getQuotaCacheFileName } from '@/utils/quota/identity';
+import { getQuotaCacheFileName, getQuotaCacheKey } from '@/utils/quota/identity';
+import type { QuotaSnapshot } from '@/features/quota/snapshot/types';
+import {
+  fileAuthIndex,
+  listingCaughtUp,
+  listingUpdatedAfter,
+  type PolledQuotaSnapshot,
+} from '@/features/quota/snapshot/windows';
 import type {
   AntigravityQuotaState,
-  ClaudeQuotaState,
-  CodexQuotaState,
+  AuthFileItem,
   DevinQuotaState,
   KimiQuotaState,
   MetaQuotaState,
+  SnapshotPollState,
   XaiQuotaState,
 } from '@/types';
 
@@ -20,19 +27,26 @@ interface QuotaStoreState {
   cacheGeneration: number;
   fileGenerations: Record<string, number>;
   antigravityQuota: Record<string, AntigravityQuotaState>;
-  claudeQuota: Record<string, ClaudeQuotaState>;
-  codexQuota: Record<string, CodexQuotaState>;
   devinQuota: Record<string, DevinQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
   metaQuota: Record<string, MetaQuotaState>;
   xaiQuota: Record<string, XaiQuotaState>;
+  /** On-demand poll results by auth index; the listing snapshot wins once it is as new. */
+  quotaSnapshots: Record<string, PolledQuotaSnapshot>;
+  /** Loading and error of the last on-demand poll, by quota cache key. */
+  quotaPolls: Record<string, SnapshotPollState>;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
-  setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
-  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
   setDevinQuota: (updater: QuotaUpdater<Record<string, DevinQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setMetaQuota: (updater: QuotaUpdater<Record<string, MetaQuotaState>>) => void;
   setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
+  setQuotaSnapshot: (authIndex: string, name: string, snapshot: QuotaSnapshot) => void;
+  /**
+   * Drops the poll results that the listing caught up with, and the click errors
+   * that a listing snapshot from after the click replaces. Unknown auth indexes stay.
+   */
+  reconcileQuotaSnapshots: (files: readonly AuthFileItem[]) => void;
+  setQuotaPolls: (updater: QuotaUpdater<Record<string, SnapshotPollState>>) => void;
   clearQuotaCache: (names?: string[]) => void;
 }
 
@@ -47,23 +61,15 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
   cacheGeneration: 0,
   fileGenerations: {},
   antigravityQuota: {},
-  claudeQuota: {},
-  codexQuota: {},
   devinQuota: {},
   kimiQuota: {},
   metaQuota: {},
   xaiQuota: {},
+  quotaSnapshots: {},
+  quotaPolls: {},
   setAntigravityQuota: (updater) =>
     set((state) => ({
       antigravityQuota: resolveUpdater(updater, state.antigravityQuota),
-    })),
-  setClaudeQuota: (updater) =>
-    set((state) => ({
-      claudeQuota: resolveUpdater(updater, state.claudeQuota),
-    })),
-  setCodexQuota: (updater) =>
-    set((state) => ({
-      codexQuota: resolveUpdater(updater, state.codexQuota),
     })),
   setDevinQuota: (updater) =>
     set((state) => ({
@@ -79,6 +85,36 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     set((state) => ({
       xaiQuota: resolveUpdater(updater, state.xaiQuota),
     })),
+  setQuotaSnapshot: (authIndex, name, snapshot) =>
+    set((state) => ({
+      quotaSnapshots: { ...state.quotaSnapshots, [authIndex]: { name, snapshot } },
+    })),
+  reconcileQuotaSnapshots: (files) =>
+    set((state) => {
+      const caughtUp = files.filter((file) => {
+        const authIndex = fileAuthIndex(file);
+        const polled = authIndex ? state.quotaSnapshots[authIndex] : undefined;
+        return polled !== undefined && listingCaughtUp(polled.snapshot, file.quota_snapshot);
+      });
+      const answered = files.filter((file) => {
+        const poll = state.quotaPolls[getQuotaCacheKey(file)];
+        return (
+          poll?.status === 'error' &&
+          poll.failedAtMs !== undefined &&
+          listingUpdatedAfter(file.quota_snapshot, poll.failedAtMs)
+        );
+      });
+      if (caughtUp.length === 0 && answered.length === 0) return state;
+      const quotaSnapshots = { ...state.quotaSnapshots };
+      caughtUp.forEach((file) => delete quotaSnapshots[fileAuthIndex(file) as string]);
+      const quotaPolls = { ...state.quotaPolls };
+      answered.forEach((file) => {
+        quotaPolls[getQuotaCacheKey(file)] = { status: 'idle' };
+      });
+      return { quotaSnapshots, quotaPolls };
+    }),
+  setQuotaPolls: (updater) =>
+    set((state) => ({ quotaPolls: resolveUpdater(updater, state.quotaPolls) })),
   clearQuotaCache: (names) =>
     set((state) => {
       if (names) {
@@ -88,9 +124,12 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
           fileGenerations[name] = (fileGenerations[name] ?? 0) + 1;
         });
         const invalidatedNames = new Set(names);
-        const omitNames = <T>(cache: Record<string, T>): Record<string, T> => {
+        const omitNames = <T>(
+          cache: Record<string, T>,
+          nameOf: (key: string, value: T) => string = getQuotaCacheFileName
+        ): Record<string, T> => {
           const keysToDelete = Object.keys(cache).filter((key) =>
-            invalidatedNames.has(getQuotaCacheFileName(key))
+            invalidatedNames.has(nameOf(key, cache[key]))
           );
           if (keysToDelete.length === 0) return cache;
           const next = { ...cache };
@@ -100,24 +139,24 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         return {
           fileGenerations,
           antigravityQuota: omitNames(state.antigravityQuota),
-          claudeQuota: omitNames(state.claudeQuota),
-          codexQuota: omitNames(state.codexQuota),
           devinQuota: omitNames(state.devinQuota),
           kimiQuota: omitNames(state.kimiQuota),
           metaQuota: omitNames(state.metaQuota),
           xaiQuota: omitNames(state.xaiQuota),
+          quotaSnapshots: omitNames(state.quotaSnapshots, (_authIndex, polled) => polled.name),
+          quotaPolls: omitNames(state.quotaPolls),
         };
       }
       return {
         cacheGeneration: state.cacheGeneration + 1,
         fileGenerations: {},
         antigravityQuota: {},
-        claudeQuota: {},
-        codexQuota: {},
         devinQuota: {},
         kimiQuota: {},
         metaQuota: {},
         xaiQuota: {},
+        quotaSnapshots: {},
+        quotaPolls: {},
       };
     }),
 }));

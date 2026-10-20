@@ -16,7 +16,7 @@ import (
 const xaiBillingMonthlyNoLimitBody = `{"config":{"monthlyLimit":{"val":0},"used":{"val":67},"onDemandCap":{"val":0},` +
 	`"billingPeriodStart":"2026-10-01T00:00:00+00:00","billingPeriodEnd":"2026-11-01T00:00:00+00:00"}}`
 
-func pollXAIQuotaWith(t *testing.T, weeklyStatus int, weeklyBody string, monthlyBody string) (http.Header, error) {
+func pollXAIQuotaWith(t *testing.T, weeklyStatus int, weeklyBody string, monthlyBody string) (cliproxyauth.QuotaObservation, error) {
 	t.Helper()
 	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		status, body := http.StatusOK, monthlyBody
@@ -35,32 +35,32 @@ func pollXAIQuotaWith(t *testing.T, weeklyStatus int, weeklyBody string, monthly
 		Provider: "xai",
 		Metadata: map[string]any{"access_token": "token", "auth_kind": "oauth"},
 	}
-	return NewXAIExecutor(&config.Config{}).PollQuota(ctx, auth)
+	return NewXAIExecutor(&config.Config{}).PollQuota(ctx, auth, cliproxyauth.PollBackground)
 }
 
 func TestXAIPollQuotaFailsWhenWeeklyBillingFails(t *testing.T) {
-	headers, errPoll := pollXAIQuotaWith(t, http.StatusServiceUnavailable,
+	obs, errPoll := pollXAIQuotaWith(t, http.StatusServiceUnavailable,
 		`{"code":"The service is currently unavailable","error":"cursor billing: snapshot failed"}`,
 		xaiBillingMonthlyNoLimitBody)
 	if errPoll == nil {
-		t.Fatalf("PollQuota() error = nil, headers = %v; want the weekly billing error so the last snapshot stays", headers)
+		t.Fatalf("PollQuota() error = nil, observation = %+v; want the weekly billing error so the last snapshot stays", obs)
 	}
-	if headers != nil {
-		t.Fatalf("PollQuota() headers = %v, want nil", headers)
+	if obs.Provider != "" {
+		t.Fatalf("PollQuota() observation = %+v, want none", obs)
 	}
 }
 
 func TestXAIPollQuotaUsesMonthlyWhenWeeklyReportsNoPeriod(t *testing.T) {
-	headers, errPoll := pollXAIQuotaWith(t, http.StatusOK, `{"config":{}}`,
+	obs, errPoll := pollXAIQuotaWith(t, http.StatusOK, `{"config":{}}`,
 		`{"config":{"monthlyLimit":{"val":1000},"used":{"val":250},`+
 			`"billingPeriodStart":"2026-10-01T00:00:00+00:00","billingPeriodEnd":"2026-11-01T00:00:00+00:00"}}`)
 	if errPoll != nil {
 		t.Fatalf("PollQuota() error = %v", errPoll)
 	}
-	if got := headers.Get("X-Xai-Billing-Period-Type"); got != "monthly" {
-		t.Fatalf("period type = %q, want monthly", got)
+	if len(obs.Windows) != 1 || obs.Windows[0].ID != "monthly" {
+		t.Fatalf("windows = %+v, want one monthly window", obs.Windows)
 	}
-	if got := headers.Get("X-Xai-Billing-Used-Percent"); got != "25" {
-		t.Fatalf("used percent = %q, want 25", got)
+	if used, known := obs.Windows[0].Used.Get(); !known || used != 25 {
+		t.Fatalf("used percent = %v (known %t), want 25", used, known)
 	}
 }

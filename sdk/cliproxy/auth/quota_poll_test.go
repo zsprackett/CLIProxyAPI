@@ -2,8 +2,11 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +17,12 @@ import (
 type quotaPollingExecutor struct {
 	id      string
 	headers http.Header
+	err     error
+	polled  chan PollTrigger
+	// release, when set, holds PollQuota after it reported on polled.
+	release chan struct{}
+	// panicValue, when set, makes PollQuota panic with it.
+	panicValue any
 }
 
 func (e *quotaPollingExecutor) Identifier() string { return e.id }
@@ -32,8 +41,61 @@ func (e *quotaPollingExecutor) HttpRequest(context.Context, *Auth, *http.Request
 func (e *quotaPollingExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, error) {
 	return auth, nil
 }
-func (e *quotaPollingExecutor) PollQuota(context.Context, *Auth) (http.Header, error) {
-	return e.headers.Clone(), nil
+func (e *quotaPollingExecutor) PollQuota(ctx context.Context, auth *Auth, trigger PollTrigger) (QuotaObservation, error) {
+	if e.polled != nil {
+		e.polled <- trigger
+	}
+	if e.release != nil {
+		<-e.release
+	}
+	if e.panicValue != nil {
+		panic(e.panicValue)
+	}
+	// A real poller's HTTP client gives up once its context is cancelled.
+	if errCtx := ctx.Err(); errCtx != nil {
+		return QuotaObservation{}, errCtx
+	}
+	if e.err != nil {
+		return QuotaObservation{}, e.err
+	}
+	obs, ok := fromHeadersAdapter(auth.Provider, e.headers, time.Now())
+	if !ok {
+		return QuotaObservation{}, ErrQuotaNotPollable
+	}
+	return obs, nil
+}
+
+// fromHeadersAdapter turns the header form the test fixtures use into a poll
+// observation, the way the P1 pollers did before they returned observations.
+func fromHeadersAdapter(provider string, headers http.Header, now time.Time) (QuotaObservation, bool) {
+	kind, ok := providerKindOf(provider)
+	if !ok {
+		return QuotaObservation{}, false
+	}
+	var obs QuotaObservation
+	var section SectionID
+	switch kind {
+	case ProviderClaude:
+		obs, ok = claudeHeadersObservationScoped(headers, "fable", now)
+		section = SectionClaudeUsage
+	case ProviderCodex:
+		obs, ok = codexHeadersObservation(headers, "", now)
+		section = SectionCodexUsage
+	case ProviderXAI:
+		return XAIBillingPollObservation(headers, now)
+	default:
+		return QuotaObservation{}, false
+	}
+	if !ok {
+		return QuotaObservation{}, false
+	}
+	obs.Source = SourcePoll
+	obs.Sections = map[SectionID]SectionStatus{section: SectionOK}
+	for i := range obs.Windows {
+		obs.Windows[i].Section = section
+		obs.Windows[i].Source = SourcePoll
+	}
+	return obs, true
 }
 
 func TestManager_QuotaPollInterval(t *testing.T) {
@@ -64,6 +126,10 @@ func TestQuotaPollDue(t *testing.T) {
 		{"never polled", last, time.Time{}, 5 * time.Minute, true},
 		{"before interval", last.Add(4 * time.Minute), last, 5 * time.Minute, false},
 		{"at interval", last.Add(5 * time.Minute), last, 5 * time.Minute, true},
+		{"one tick early is not due", last.Add(30 * time.Second), last, time.Minute, false},
+		{"a late tick within half a tick is due", last.Add(59 * time.Second), last, time.Minute, true},
+		{"a half tick early is due", last.Add(45 * time.Second), last, time.Minute, true},
+		{"less than half a tick is not due", last.Add(44 * time.Second), last, time.Minute, false},
 	}
 	for _, tc := range cases {
 		if got := quotaPollDue(tc.now, tc.last, tc.interval); got != tc.want {
@@ -103,7 +169,7 @@ func TestManager_QuotaPollTargetsAndObservation(t *testing.T) {
 	}
 
 	before, _ := manager.GetByID("codex-a")
-	manager.pollQuotaOnce(ctx, targets[0])
+	manager.pollQuotaOnce(ctx, targets[0], PollBackground)
 	after, _ := manager.GetByID("codex-a")
 	var primary *QuotaWindowObs
 	for i := range after.QuotaSnapshot.Windows {
@@ -134,11 +200,11 @@ type pollingHook struct {
 	before func()
 }
 
-func (e *pollingHook) PollQuota(ctx context.Context, auth *Auth) (http.Header, error) {
+func (e *pollingHook) PollQuota(ctx context.Context, auth *Auth, trigger PollTrigger) (QuotaObservation, error) {
 	if e.before != nil {
 		e.before()
 	}
-	return e.quotaPollingExecutor.PollQuota(ctx, auth)
+	return e.quotaPollingExecutor.PollQuota(ctx, auth, trigger)
 }
 
 func claudePollHeaders(fiveHour, sevenDay string) http.Header {
@@ -206,7 +272,7 @@ func pollOnce(t *testing.T, manager *Manager, authID string) {
 	t.Helper()
 	for _, target := range manager.quotaPollTargets() {
 		if target.auth.ID == authID {
-			manager.pollQuotaOnce(context.Background(), target)
+			manager.pollQuotaOnce(context.Background(), target, PollBackground)
 			return
 		}
 	}
@@ -459,5 +525,323 @@ func TestQuotaPollXAIWeeklyAfterMonthlyRetiresMonthlyWindow(t *testing.T) {
 	}
 	if got["xai:weekly"].UsedPercent != 35 {
 		t.Fatalf("weekly window = %+v, want 35 used", got["xai:weekly"])
+	}
+}
+
+// fakeClock is a clock the test sets; the poll goroutines read it.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Set(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = now
+}
+
+// newTickPollManager registers one Claude credential with a 60 s poll
+// interval and a clock the test drives.
+func newTickPollManager(t *testing.T, exec *quotaPollingExecutor, clock *fakeClock) *Manager {
+	t.Helper()
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.RegisterExecutor(exec)
+	manager.quotaPoll.nowFunc = clock.Now
+	cfg := &internalconfig.Config{QuotaPollIntervalSeconds: 60}
+	manager.runtimeConfig.Store(cfg)
+	if _, errRegister := manager.Register(WithSkipPersist(context.Background()), &Auth{ID: "claude-a", Provider: "claude", Status: StatusActive}); errRegister != nil {
+		t.Fatalf("register: %v", errRegister)
+	}
+	return manager
+}
+
+func awaitPoll(t *testing.T, polled <-chan PollTrigger, want PollTrigger) {
+	t.Helper()
+	select {
+	case got := <-polled:
+		if got != want {
+			t.Fatalf("poll trigger = %v, want %v", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no poll ran")
+	}
+}
+
+// awaitIdle waits for the in-flight poll of authID, if any, to finish.
+func awaitIdle(manager *Manager, authID string) {
+	manager.quotaPoll.mu.Lock()
+	call := manager.quotaPoll.inFlight[authID]
+	manager.quotaPoll.mu.Unlock()
+	if call != nil {
+		<-call.done
+	}
+}
+
+func assertNoPoll(t *testing.T, polled <-chan PollTrigger) {
+	t.Helper()
+	select {
+	case got := <-polled:
+		t.Fatalf("unexpected %v poll", got)
+	default:
+	}
+}
+
+// The loop wakes every 30 s. A 60 s interval must poll every 60 s, not every
+// 90 s, and a click resets the background timer.
+func TestRunQuotaPollTicksMatchesConfiguredInterval(t *testing.T) {
+	start := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: start}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), polled: make(chan PollTrigger)}
+	manager := newTickPollManager(t, exec, clock)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		manager.runQuotaPollTicks(ctx, ticks)
+	}()
+	tick := func(offset time.Duration) {
+		awaitIdle(manager, "claude-a")
+		clock.Set(start.Add(offset))
+		ticks <- clock.Now()
+	}
+
+	tick(0)
+	awaitPoll(t, exec.polled, PollBackground)
+	tick(30 * time.Second)
+	tick(60 * time.Second)
+	awaitPoll(t, exec.polled, PollBackground)
+	tick(90 * time.Second)
+	tick(120 * time.Second)
+	awaitPoll(t, exec.polled, PollBackground)
+
+	// A click at second 150 polls now and defers the next background poll to second 210.
+	awaitIdle(manager, "claude-a")
+	clock.Set(start.Add(150 * time.Second))
+	go func() {
+		if _, errPoll := manager.PollQuotaNow(ctx, "claude-a"); errPoll != nil {
+			t.Errorf("PollQuotaNow: %v", errPoll)
+		}
+	}()
+	awaitPoll(t, exec.polled, PollOnDemand)
+	tick(180 * time.Second)
+	tick(210 * time.Second)
+	awaitPoll(t, exec.polled, PollBackground)
+	awaitIdle(manager, "claude-a")
+	assertNoPoll(t, exec.polled)
+	cancel()
+	<-done
+}
+
+// Two on-demand polls of one credential share one upstream request.
+func TestPollQuotaNowJoinsInFlightPoll(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), polled: make(chan PollTrigger), release: make(chan struct{})}
+	manager := newTickPollManager(t, exec, clock)
+	joined := make(chan struct{})
+	manager.quotaPoll.joined = func() { joined <- struct{}{} }
+	ctx := context.Background()
+	results := make(chan QuotaSnapshot, 2)
+	pollNow := func() {
+		snapshot, errPoll := manager.PollQuotaNow(ctx, "claude-a")
+		if errPoll != nil {
+			t.Errorf("PollQuotaNow: %v", errPoll)
+		}
+		results <- snapshot
+	}
+	go pollNow()
+	awaitPoll(t, exec.polled, PollOnDemand)
+	// The first poll is held inside PollQuota, so the second call must join it.
+	go pollNow()
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second call did not join the poll in flight")
+	}
+	exec.release <- struct{}{}
+	first, second := <-results, <-results
+	assertNoPoll(t, exec.polled)
+	if first.LastPoll == nil || second.LastPoll == nil || !first.LastPoll.At.Equal(second.LastPoll.At) {
+		t.Fatalf("joined polls differ: %+v vs %+v", first.LastPoll, second.LastPoll)
+	}
+	if first.LastPoll.Trigger != PollOnDemand {
+		t.Fatalf("trigger = %v, want on_demand", first.LastPoll.Trigger)
+	}
+}
+
+// A client that aborts its request does not abort the shared poll: the
+// joiner gets the real result and the stored snapshot carries no cancellation.
+func TestPollQuotaNowSurvivesStarterCancel(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), polled: make(chan PollTrigger), release: make(chan struct{})}
+	manager := newTickPollManager(t, exec, clock)
+	joined := make(chan struct{})
+	manager.quotaPoll.joined = func() { joined <- struct{}{} }
+
+	starterCtx, cancelStarter := context.WithCancel(context.Background())
+	defer cancelStarter()
+	starterErr := make(chan error, 1)
+	go func() {
+		_, errPoll := manager.PollQuotaNow(starterCtx, "claude-a")
+		starterErr <- errPoll
+	}()
+	awaitPoll(t, exec.polled, PollOnDemand)
+	joinerResult := make(chan QuotaSnapshot, 1)
+	go func() {
+		snapshot, errPoll := manager.PollQuotaNow(context.Background(), "claude-a")
+		if errPoll != nil {
+			t.Errorf("joiner PollQuotaNow: %v", errPoll)
+		}
+		joinerResult <- snapshot
+	}()
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second call did not join the poll in flight")
+	}
+
+	cancelStarter()
+	exec.release <- struct{}{}
+	select {
+	case errPoll := <-starterErr:
+		if !errors.Is(errPoll, context.Canceled) {
+			t.Fatalf("starter error = %v, want its own context.Canceled", errPoll)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("starter did not return after its cancel")
+	}
+	snapshot := <-joinerResult
+	if snapshot.LastPoll == nil || snapshot.LastPoll.Error != "" || len(snapshot.Windows) != 2 {
+		t.Fatalf("joiner snapshot = %+v, want the real result", snapshot)
+	}
+	stored, _ := manager.GetByID("claude-a")
+	if stored.QuotaSnapshot.LastPoll == nil || stored.QuotaSnapshot.LastPoll.Error != "" {
+		t.Fatalf("stored last poll = %+v, want no error", stored.QuotaSnapshot.LastPoll)
+	}
+	awaitIdle(manager, "claude-a")
+	if !manager.quotaPoll.due("claude-a", clock.Now().Add(time.Hour), time.Minute) {
+		t.Fatal("the credential is still marked in flight")
+	}
+}
+
+// A poller that panics fails that one poll and leaves the credential pollable.
+func TestPollQuotaNowRecoversFromPollerPanic(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), panicValue: "boom"}
+	manager := newTickPollManager(t, exec, clock)
+	ctx := context.Background()
+
+	snapshot, errPoll := manager.PollQuotaNow(ctx, "claude-a")
+	if errPoll != nil {
+		t.Fatalf("a poller panic returned an error: %v", errPoll)
+	}
+	if snapshot.LastPoll == nil || !strings.Contains(snapshot.LastPoll.Error, "boom") {
+		t.Fatalf("last poll = %+v, want the panic as the poll error", snapshot.LastPoll)
+	}
+
+	exec.panicValue = nil
+	done := make(chan QuotaSnapshot, 1)
+	go func() {
+		next, errNext := manager.PollQuotaNow(ctx, "claude-a")
+		if errNext != nil {
+			t.Errorf("second PollQuotaNow: %v", errNext)
+		}
+		done <- next
+	}()
+	select {
+	case next := <-done:
+		if next.LastPoll == nil || next.LastPoll.Error != "" || len(next.Windows) != 2 {
+			t.Fatalf("second poll = %+v, want a clean result", next)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the credential stayed in flight after the panic")
+	}
+}
+
+// A credential removed while polling is disabled is forgotten, so when it
+// comes back it is polled at once instead of waiting out the old interval.
+func TestRunQuotaPollTicksForgetsRemovedCredentialWhileDisabled(t *testing.T) {
+	start := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: start}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), polled: make(chan PollTrigger)}
+	manager := newTickPollManager(t, exec, clock)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		manager.runQuotaPollTicks(ctx, ticks)
+	}()
+	tick := func(offset time.Duration) {
+		awaitIdle(manager, "claude-a")
+		clock.Set(start.Add(offset))
+		ticks <- clock.Now()
+	}
+
+	tick(0)
+	awaitPoll(t, exec.polled, PollBackground)
+	awaitIdle(manager, "claude-a")
+	manager.runtimeConfig.Store(&internalconfig.Config{QuotaPollIntervalSeconds: 0})
+	manager.Remove(ctx, "claude-a")
+	tick(30 * time.Second)
+	// The loop takes the next tick only after it finished the one before, so
+	// the second tick proves the first ran with the credential gone.
+	tick(35 * time.Second)
+
+	if _, errRegister := manager.Register(WithSkipPersist(ctx), &Auth{ID: "claude-a", Provider: "claude", Status: StatusActive}); errRegister != nil {
+		t.Fatalf("register again: %v", errRegister)
+	}
+	manager.runtimeConfig.Store(&internalconfig.Config{QuotaPollIntervalSeconds: 60})
+	tick(40 * time.Second)
+	awaitPoll(t, exec.polled, PollBackground)
+	cancel()
+	<-done
+}
+
+func TestPollQuotaNowErrors(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5")}
+	manager := newTickPollManager(t, exec, clock)
+	ctx := context.Background()
+	if _, errPoll := manager.PollQuotaNow(ctx, "missing"); !errors.Is(errPoll, ErrQuotaAuthNotFound) {
+		t.Fatalf("unknown auth error = %v, want ErrQuotaAuthNotFound", errPoll)
+	}
+	if _, errRegister := manager.Register(WithSkipPersist(ctx), &Auth{ID: "ag-a", Provider: "antigravity", Status: StatusActive}); errRegister != nil {
+		t.Fatalf("register: %v", errRegister)
+	}
+	if _, errPoll := manager.PollQuotaNow(ctx, "ag-a"); !errors.Is(errPoll, ErrQuotaNotPollable) {
+		t.Fatalf("unsupported provider error = %v, want ErrQuotaNotPollable", errPoll)
+	}
+	exec.err = ErrQuotaNotPollable
+	if _, errPoll := manager.PollQuotaNow(ctx, "claude-a"); !errors.Is(errPoll, ErrQuotaNotPollable) {
+		t.Fatalf("api key error = %v, want ErrQuotaNotPollable", errPoll)
+	}
+	got, _ := manager.GetByID("claude-a")
+	if !got.QuotaSnapshot.IsZero() {
+		t.Fatalf("a not-pollable credential gained a snapshot: %+v", got.QuotaSnapshot)
+	}
+
+	exec.err = errors.New("usage: 503")
+	snapshot, errPoll := manager.PollQuotaNow(ctx, "claude-a")
+	if errPoll != nil {
+		t.Fatalf("upstream failure returned an error: %v", errPoll)
+	}
+	if snapshot.LastPoll == nil || snapshot.LastPoll.Error != "usage: 503" || !snapshot.LastPoll.At.Equal(clock.Now()) {
+		t.Fatalf("last poll = %+v, want the upstream error at the clock time", snapshot.LastPoll)
+	}
+
+	cfg := &internalconfig.Config{QuotaPollIntervalSeconds: 60}
+	cfg.Home.Enabled = true
+	manager.runtimeConfig.Store(cfg)
+	if _, errPoll := manager.PollQuotaNow(ctx, "claude-a"); !errors.Is(errPoll, ErrQuotaPollHomeMode) {
+		t.Fatalf("home mode error = %v, want ErrQuotaPollHomeMode", errPoll)
 	}
 }

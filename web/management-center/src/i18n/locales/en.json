@@ -1582,6 +1582,7 @@
     "window_reset_awaiting": "Reset, awaiting data",
     "window_limit_reached": "Limit reached",
     "window_stale_since": "Stale since {{age}}",
+    "poll_failed": "Last quota poll failed: {{message}}",
     "window_stale_hint": "The last poll for this limit failed. The percent is the last good reading.",
     "ledger_refresh": "Refresh quota",
     "ledger_load": "Load quota",

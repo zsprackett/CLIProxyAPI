@@ -277,22 +277,7 @@ export function laneHasWindow(lane: TimelineLane): boolean {
 
 /* ------------------------------------------------------------------ lanes */
 
-/** Shape the lane builder reads. Deliberately structural — see the note below. */
-interface WindowLike {
-  id?: string;
-  label?: string;
-  usedPercent?: number | null;
-  resetAtMs?: number | null;
-  periodHours?: number | null;
-}
-
-interface ResetCreditLike {
-  id?: string;
-  status?: string;
-  grantedAt?: string;
-  expiresAt?: string;
-}
-
+/** Shapes the lane builder reads. Deliberately structural — see the note below. */
 interface KimiRowLike {
   label?: string;
   labelKey?: string;
@@ -385,11 +370,26 @@ function snapshotLane(
   const chosen = preferred ?? pickLaneWindow(candidates, maxPeriodHours);
   if (!chosen) return empty;
 
+  const credits =
+    snapshot.extras?.kind === 'codex' ? (snapshot.extras.reset_credits?.value?.credits ?? []) : [];
   return {
     ...empty,
     anchorMs: chosen.resetAtMs,
     periodHours: chosen.periodHours,
     remaining: chosen.remaining,
+    resetCredits: credits
+      .filter((credit) => credit.status === 'available')
+      .map((credit): TimelineResetCredit | null => {
+        const expiresAtMs = Date.parse(credit.expires_at ?? '');
+        if (!Number.isFinite(expiresAtMs)) return null;
+        const grantedAtMs = Date.parse(credit.granted_at ?? '');
+        return {
+          id: credit.id,
+          grantedAtMs: Number.isFinite(grantedAtMs) ? grantedAtMs : null,
+          expiresAtMs,
+        };
+      })
+      .filter((credit): credit is TimelineResetCredit => credit !== null),
     limits: windows
       .filter((entry) => entry.remaining !== null)
       .map((entry) => {
@@ -432,65 +432,6 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
   const reading = newerQuotaReading(quota, snapshot?.provider === provider ? snapshot : null);
   if (reading === 'snapshot' && snapshot) return snapshotLane(empty, snapshot, maxPeriodHours);
   if (reading !== 'live' || !quota) return empty;
-
-  if (provider === 'claude' || provider === 'codex') {
-    const windows = ((quota as { windows?: WindowLike[] }).windows ?? []).filter(
-      (window) => typeof window.resetAtMs === 'number'
-    );
-    const preferredCodexId =
-      maxPeriodHours !== undefined && maxPeriodHours <= SESSION_PERIOD_HOURS
-        ? 'five-hour'
-        : 'weekly';
-    // Codex can report model-scoped windows with the same period as the account
-    // window (for example GPT-5.3-Codex-Spark weekly). A reset-time tie-break
-    // would make the lane silently switch to that model's quota. Keep the lane
-    // anchored to the standard account window whenever it fits this view.
-    const preferredCodexWindow =
-      provider === 'codex'
-        ? windows.find(
-            (window) =>
-              window.id === preferredCodexId &&
-              typeof window.periodHours === 'number' &&
-              window.periodHours > 0 &&
-              (maxPeriodHours === undefined || window.periodHours <= maxPeriodHours)
-          )
-        : undefined;
-    const chosen = preferredCodexWindow ?? pickLaneWindow(windows, maxPeriodHours);
-    if (!chosen) return empty;
-
-    const resetCredits =
-      provider === 'codex'
-        ? ((quota as { rateLimitResetCredits?: ResetCreditLike[] }).rateLimitResetCredits ?? [])
-            .filter((credit) => credit.status === 'available')
-            .map((credit): TimelineResetCredit | null => {
-              const expiresAtMs = new Date(credit.expiresAt ?? '').getTime();
-              if (!Number.isFinite(expiresAtMs)) return null;
-
-              const grantedAtMs = new Date(credit.grantedAt ?? '').getTime();
-              return {
-                id: credit.id ?? '',
-                grantedAtMs: Number.isFinite(grantedAtMs) ? grantedAtMs : null,
-                expiresAtMs,
-              };
-            })
-            .filter((credit): credit is TimelineResetCredit => credit !== null)
-        : [];
-
-    return {
-      ...empty,
-      anchorMs: chosen.resetAtMs ?? null,
-      periodHours: chosen.periodHours ?? null,
-      // Claude and Codex store percent USED.
-      remaining: remainingFromUsed(chosen.usedPercent),
-      limits: windows
-        .map((window) => ({
-          label: window.label ?? '',
-          remaining: remainingFromUsed(window.usedPercent),
-        }))
-        .filter((limit): limit is TimelineLimit => limit.remaining !== null),
-      resetCredits,
-    };
-  }
 
   if (provider === 'devin') {
     const windows =
