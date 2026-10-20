@@ -171,10 +171,10 @@ func claudeProfileFlag(value any) *bool {
 		return &v
 	case string:
 		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "true":
+		case "true", "1", "yes", "y", "on":
 			out := true
 			return &out
-		case "false":
+		case "false", "0", "no", "n", "off":
 			out := false
 			return &out
 		}
