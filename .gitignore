@@ -67,3 +67,8 @@ docker-compose.override.yml
 
 # Local LLM Wiki vault
 .llm-wiki
+
+# Deploy state (scripts/deploy.sh)
+/releases/
+/DEPLOYED
+/.deploy.lock

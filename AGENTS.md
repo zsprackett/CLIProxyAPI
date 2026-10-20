@@ -14,6 +14,8 @@ go test ./... # Run all tests
 go test -v -run TestName ./path/to/pkg # Run single test
 go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRED after changes)
 ./build-panel.sh # Build web/management-center into static/management.html (needs bun 1.3.14)
+scripts/deploy.sh [ref] # Build binary + panel from one commit, install both, restart, health-check, auto-rollback (default origin/main)
+scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit on a port in 18390-18399 (never the live proxy)
 # A local panel build needs `disable-auto-update-panel: true`, or the panel auto-updater replaces it with a GitHub release
 ```
 - Common flags: `--config <path>`, `--tui`, `--standalone`, `--local-model`, `--no-browser`, `--oauth-callback-port <port>`
