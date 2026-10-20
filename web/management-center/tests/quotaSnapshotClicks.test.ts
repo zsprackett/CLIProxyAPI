@@ -29,6 +29,7 @@ const { QuotaCard } = await import('@/features/quota/components/QuotaCard');
 const { AuthFileQuotaSection } =
   await import('@/features/authFiles/components/AuthFileQuotaSection');
 const { useQuotaActions } = await import('@/features/quota/hooks/useQuotaActions');
+const { useAuthFilesData } = await import('@/features/authFiles/hooks/useAuthFilesData');
 
 const claudeGolden: QuotaSnapshot = JSON.parse(
   readFileSync(
@@ -65,7 +66,7 @@ let answer: () => Promise<Answer> = async () => ({ status: 200, data: {} });
 
 /** The backend: records each request and answers with `answer`, as the server would. */
 const backend: AxiosAdapter = async (config) => {
-  requests.push([config.url, JSON.parse(String(config.data))]);
+  requests.push([config.url, config.data === undefined ? null : JSON.parse(String(config.data))]);
   const { status, data } = await answer();
   const response = { status, statusText: '', data, headers: {}, config } as AxiosResponse;
   if (status >= 400) {
@@ -93,6 +94,17 @@ const clickLoadQuota = (file: AuthFileItem): Promise<void> => {
   }
   renderToStaticMarkup(createElement(Harness));
   return actions!.refreshQuota(file, QUOTA_ADAPTERS.claude);
+};
+
+/** The auth-file page loading its listing, as its refresh and its interval do. */
+const loadAuthFilesListing = (): Promise<void> => {
+  let load: ReturnType<typeof useAuthFilesData>['loadFiles'] | undefined;
+  function Harness() {
+    load = useAuthFilesData().loadFiles;
+    return null;
+  }
+  renderToStaticMarkup(createElement(Harness));
+  return load!({ background: true });
 };
 
 /** The quota page's card: the listing entry with the click's poll result applied. */
@@ -297,5 +309,36 @@ describe('the answer to a click on the quota page', () => {
 
     expect(requests).toEqual([['/credentials/quota/poll', { auth_index: 'idx-a' }]]);
     expect(renderQuotaPageCard(claudeFile())).toContain('<span class="codexPlanValue">Max</span>');
+  });
+});
+
+describe('a failed click on an auth-file card', () => {
+  const failClick = async () => {
+    answerWith(500, { error: 'upstream timeout' });
+    await clickLoadQuota(claudeFile());
+  };
+
+  test('gives way to the next listing, which carries a newer snapshot', async () => {
+    await failClick();
+    expect(renderAuthFileSection(claudeFile())).toContain('Failed to load quota: upstream timeout');
+
+    answerWith(200, { files: [claudeFile(listedReading(iso(Date.now() + MINUTE)))] });
+    await loadAuthFilesListing();
+
+    const section = renderAuthFileSection(claudeFile(listedReading(iso(Date.now() + MINUTE))));
+    expect(section).not.toContain('quotaError');
+    expect(section).not.toContain('Failed to load quota');
+    expect(section).toContain('<span class="windowPercent">10%</span>');
+  });
+
+  test('stays over a listing whose snapshot is older than the click', async () => {
+    await failClick();
+
+    answerWith(200, { files: [claudeFile(listedReading(iso(Date.now() - MINUTE)))] });
+    await loadAuthFilesListing();
+
+    expect(renderAuthFileSection(claudeFile(listedReading(iso(Date.now() - MINUTE))))).toContain(
+      'Failed to load quota: upstream timeout'
+    );
   });
 });
