@@ -792,6 +792,9 @@ func TestRunQuotaPollTicksForgetsRemovedCredentialWhileDisabled(t *testing.T) {
 	manager.runtimeConfig.Store(&internalconfig.Config{QuotaPollIntervalSeconds: 0})
 	manager.Remove(ctx, "claude-a")
 	tick(30 * time.Second)
+	// The loop takes the next tick only after it finished the one before, so
+	// the second tick proves the first ran with the credential gone.
+	tick(35 * time.Second)
 
 	if _, errRegister := manager.Register(WithSkipPersist(ctx), &Auth{ID: "claude-a", Provider: "claude", Status: StatusActive}); errRegister != nil {
 		t.Fatalf("register again: %v", errRegister)

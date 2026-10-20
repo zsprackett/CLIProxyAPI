@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -145,15 +147,12 @@ func (m *Manager) runQuotaPollTicks(ctx context.Context, ticks <-chan time.Time)
 			return
 		case now := <-ticks:
 			interval := m.quotaPollInterval()
-			if interval <= 0 {
-				continue
-			}
 			targets := m.quotaPollTargets()
 			current := make(map[string]struct{}, len(targets))
 			for _, target := range targets {
 				id := target.auth.ID
 				current[id] = struct{}{}
-				if !m.quotaPoll.due(id, now, interval) {
+				if interval <= 0 || !m.quotaPoll.due(id, now, interval) {
 					continue
 				}
 				select {
@@ -221,44 +220,70 @@ func (m *Manager) PollQuotaNow(ctx context.Context, authID string) (QuotaSnapsho
 
 // pollQuota runs one poll of target, or joins the one in flight. The caller
 // that starts the poll stamps lastPolled, so a click resets the background timer.
+// The poll itself runs detached from the caller's context: it belongs to every
+// waiter, so one client that aborts must not fail the others. Each waiter still
+// returns on its own context.
 func (m *Manager) pollQuota(ctx context.Context, target quotaPollTarget, trigger PollTrigger, now time.Time) (QuotaSnapshot, error) {
 	id := target.auth.ID
 	state := &m.quotaPoll
 	state.mu.Lock()
-	if call, busy := state.inFlight[id]; busy {
+	call, busy := state.inFlight[id]
+	if busy {
 		state.mu.Unlock()
 		if state.joined != nil {
 			state.joined()
 		}
-		select {
-		case <-call.done:
-			return call.snapshot, call.err
-		case <-ctx.Done():
-			return QuotaSnapshot{}, ctx.Err()
+	} else {
+		if state.inFlight == nil {
+			state.inFlight = make(map[string]*quotaPollCall)
+			state.lastPolled = make(map[string]time.Time)
 		}
+		call = &quotaPollCall{done: make(chan struct{})}
+		state.inFlight[id] = call
+		state.lastPolled[id] = now
+		state.mu.Unlock()
+		go m.runQuotaPollCall(context.WithoutCancel(ctx), target, trigger, call)
 	}
-	if state.inFlight == nil {
-		state.inFlight = make(map[string]*quotaPollCall)
-		state.lastPolled = make(map[string]time.Time)
+	select {
+	case <-call.done:
+		return call.snapshot, call.err
+	case <-ctx.Done():
+		return QuotaSnapshot{}, ctx.Err()
 	}
-	call := &quotaPollCall{done: make(chan struct{})}
-	state.inFlight[id] = call
-	state.lastPolled[id] = now
-	state.mu.Unlock()
+}
 
+// runQuotaPollCall runs the poll and releases the in-flight slot, whatever
+// happens inside the poller.
+func (m *Manager) runQuotaPollCall(ctx context.Context, target quotaPollTarget, trigger PollTrigger, call *quotaPollCall) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			call.snapshot, call.err = QuotaSnapshot{}, fmt.Errorf("quota poll panicked: %v", recovered)
+			log.WithField("auth_id", target.auth.ID).Errorf("quota poll panicked: %v\n%s", recovered, debug.Stack())
+		}
+		m.quotaPoll.mu.Lock()
+		delete(m.quotaPoll.inFlight, target.auth.ID)
+		m.quotaPoll.mu.Unlock()
+		close(call.done)
+	}()
 	call.snapshot, call.err = m.pollQuotaOnce(ctx, target, trigger)
+}
 
-	state.mu.Lock()
-	delete(state.inFlight, id)
-	state.mu.Unlock()
-	close(call.done)
-	return call.snapshot, call.err
+// pollSafely calls the poller and turns a panic into a poll error, so the
+// credential's snapshot records the failure like any upstream error.
+func pollSafely(ctx context.Context, target quotaPollTarget, trigger PollTrigger) (obs QuotaObservation, errPoll error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			obs, errPoll = QuotaObservation{}, fmt.Errorf("quota poll panicked: %v", recovered)
+			log.WithField("auth_id", target.auth.ID).Errorf("quota poll panicked: %v\n%s", recovered, debug.Stack())
+		}
+	}()
+	return target.poller.PollQuota(ctx, target.auth, trigger)
 }
 
 func (m *Manager) pollQuotaOnce(ctx context.Context, target quotaPollTarget, trigger PollTrigger) (QuotaSnapshot, error) {
 	pollStart := m.quotaPoll.now()
 	baseline := m.cooldownStateRecordsForAuthLocked(target.auth, pollStart)
-	obs, errPoll := target.poller.PollQuota(ctx, target.auth, trigger)
+	obs, errPoll := pollSafely(ctx, target, trigger)
 	if errors.Is(errPoll, ErrQuotaNotPollable) {
 		return QuotaSnapshot{}, errPoll
 	}
