@@ -85,6 +85,12 @@ export function listingCaughtUp(polled: QuotaSnapshot, listed: unknown): boolean
 export const fileAuthIndex = (file: AuthFileItem): string | null =>
   normalizeAuthIndex(file.auth_index ?? file.authIndex);
 
+/** An on-demand poll result and the auth file it was polled for. */
+export interface PolledQuotaSnapshot {
+  name: string;
+  snapshot: QuotaSnapshot;
+}
+
 /**
  * The listing entry with its on-demand poll result in place of `quota_snapshot`,
  * until the listing carries a snapshot at least as new. The same object
@@ -92,10 +98,10 @@ export const fileAuthIndex = (file: AuthFileItem): string | null =>
  */
 export function applyPolledSnapshot(
   file: AuthFileItem,
-  polled: Readonly<Record<string, QuotaSnapshot>>
+  polled: Readonly<Record<string, PolledQuotaSnapshot>>
 ): AuthFileItem {
   const authIndex = fileAuthIndex(file);
-  const snapshot = authIndex ? polled[authIndex] : undefined;
+  const snapshot = authIndex ? polled[authIndex]?.snapshot : undefined;
   if (!snapshot || listingCaughtUp(snapshot, file.quota_snapshot)) return file;
   return { ...file, quota_snapshot: snapshot };
 }

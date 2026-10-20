@@ -83,14 +83,18 @@ describe('auth-file quota section', () => {
   });
 
   test('a poll result newer than the listing snapshot replaces it', () => {
-    serverState.quotaSnapshots = { 'idx-a': claudeReading(10, NOW - 5 * 60 * 1000) };
+    serverState.quotaSnapshots = {
+      'idx-a': { name: 'claude-a.json', snapshot: claudeReading(10, NOW - 5 * 60 * 1000) },
+    };
     const markup = renderSection(claudeFile(claudeReading(50, NOW - HOUR)));
     expect(markup).toContain('90%');
     expect(markup).not.toContain('50%');
   });
 
   test('a listing snapshot newer than the poll result replaces it', () => {
-    serverState.quotaSnapshots = { 'idx-a': claudeReading(10, NOW - 2 * HOUR) };
+    serverState.quotaSnapshots = {
+      'idx-a': { name: 'claude-a.json', snapshot: claudeReading(10, NOW - 2 * HOUR) },
+    };
     const markup = renderSection(claudeFile(claudeReading(50, NOW - HOUR)));
     expect(markup).toContain('50%');
     expect(markup).not.toContain('90%');

@@ -66,7 +66,9 @@ describe('Load quota', () => {
 
     expect(post.mock.calls).toEqual([['/credentials/quota/poll', { auth_index: 'idx-a' }]]);
     expect(apiCall).not.toHaveBeenCalled();
-    expect(useQuotaStore.getState().quotaSnapshots).toEqual({ 'idx-a': claudeGolden });
+    expect(useQuotaStore.getState().quotaSnapshots).toEqual({
+      'idx-a': { name: 'claude-a.json', snapshot: claudeGolden },
+    });
     expect(state.status).toBe('idle');
   });
 
@@ -78,7 +80,9 @@ describe('Load quota', () => {
 
     expect(post.mock.calls).toEqual([['/credentials/quota/poll', { auth_index: 'idx-c' }]]);
     expect(apiCall).not.toHaveBeenCalled();
-    expect(useQuotaStore.getState().quotaSnapshots).toEqual({ 'idx-c': snapshot });
+    expect(useQuotaStore.getState().quotaSnapshots).toEqual({
+      'idx-c': { name: 'codex-a.json', snapshot },
+    });
   });
 
   test('an upstream failure with no windows to show fails the click with its error', async () => {

@@ -34,7 +34,7 @@ const pollQuota =
 
 const storeSnapshot = (file: AuthFileItem, snapshot: QuotaSnapshot) => {
   const authIndex = fileAuthIndex(file);
-  if (authIndex) useQuotaStore.getState().setQuotaSnapshot(authIndex, snapshot);
+  if (authIndex) useQuotaStore.getState().setQuotaSnapshot(authIndex, file.name, snapshot);
 };
 
 const snapshotPollConfig = (
