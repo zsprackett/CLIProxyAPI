@@ -51,7 +51,12 @@ const snapshotPollConfig = (
   buildLoadingState: () => ({ status: 'loading' }),
   // The snapshot store holds the data; a settled click leaves no card status.
   buildSuccessState: () => ({ status: 'idle' }),
-  buildErrorState: (message, status) => ({ status: 'error', error: message, errorStatus: status }),
+  buildErrorState: (message, status) => ({
+    status: 'error',
+    error: message,
+    errorStatus: status,
+    failedAtMs: Date.now(),
+  }),
 });
 
 export const CLAUDE_CONFIG = snapshotPollConfig(

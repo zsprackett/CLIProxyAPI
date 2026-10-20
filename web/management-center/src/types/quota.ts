@@ -81,6 +81,8 @@ export interface SnapshotPollState {
   status: 'idle' | 'loading' | 'error';
   error?: string;
   errorStatus?: number;
+  /** When the click failed; a listing snapshot from after it replaces the error. */
+  failedAtMs?: number;
 }
 
 export interface DevinQuotaWindow {

@@ -81,6 +81,11 @@ export function listingCaughtUp(polled: QuotaSnapshot, listed: unknown): boolean
   return !Number.isFinite(polledMs) || listedMs >= polledMs;
 }
 
+/** Whether the listing snapshot was updated after `atMs`; false when it has no snapshot. */
+export function listingUpdatedAfter(listed: unknown, atMs: number): boolean {
+  return updatedAtMs(listed) > atMs;
+}
+
 /** The credential's auth index as the listing and the poll endpoint name it. */
 export const fileAuthIndex = (file: AuthFileItem): string | null =>
   normalizeAuthIndex(file.auth_index ?? file.authIndex);

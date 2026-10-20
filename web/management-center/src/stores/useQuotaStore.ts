@@ -3,11 +3,12 @@
  */
 
 import { create } from 'zustand';
-import { getQuotaCacheFileName } from '@/utils/quota/identity';
+import { getQuotaCacheFileName, getQuotaCacheKey } from '@/utils/quota/identity';
 import type { QuotaSnapshot } from '@/features/quota/snapshot/types';
 import {
   fileAuthIndex,
   listingCaughtUp,
+  listingUpdatedAfter,
   type PolledQuotaSnapshot,
 } from '@/features/quota/snapshot/windows';
 import type {
@@ -40,7 +41,10 @@ interface QuotaStoreState {
   setMetaQuota: (updater: QuotaUpdater<Record<string, MetaQuotaState>>) => void;
   setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
   setQuotaSnapshot: (authIndex: string, name: string, snapshot: QuotaSnapshot) => void;
-  /** Drops the poll results that the listing caught up with; unknown auth indexes stay. */
+  /**
+   * Drops the poll results that the listing caught up with, and the click errors
+   * that a listing snapshot from after the click replaces. Unknown auth indexes stay.
+   */
   reconcileQuotaSnapshots: (files: readonly AuthFileItem[]) => void;
   setQuotaPolls: (updater: QuotaUpdater<Record<string, SnapshotPollState>>) => void;
   clearQuotaCache: (names?: string[]) => void;
@@ -92,10 +96,22 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         const polled = authIndex ? state.quotaSnapshots[authIndex] : undefined;
         return polled !== undefined && listingCaughtUp(polled.snapshot, file.quota_snapshot);
       });
-      if (caughtUp.length === 0) return state;
+      const answered = files.filter((file) => {
+        const poll = state.quotaPolls[getQuotaCacheKey(file)];
+        return (
+          poll?.status === 'error' &&
+          poll.failedAtMs !== undefined &&
+          listingUpdatedAfter(file.quota_snapshot, poll.failedAtMs)
+        );
+      });
+      if (caughtUp.length === 0 && answered.length === 0) return state;
       const quotaSnapshots = { ...state.quotaSnapshots };
       caughtUp.forEach((file) => delete quotaSnapshots[fileAuthIndex(file) as string]);
-      return { quotaSnapshots };
+      const quotaPolls = { ...state.quotaPolls };
+      answered.forEach((file) => {
+        quotaPolls[getQuotaCacheKey(file)] = { status: 'idle' };
+      });
+      return { quotaSnapshots, quotaPolls };
     }),
   setQuotaPolls: (updater) =>
     set((state) => ({ quotaPolls: resolveUpdater(updater, state.quotaPolls) })),
