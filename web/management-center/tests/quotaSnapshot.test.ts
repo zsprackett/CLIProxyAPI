@@ -309,17 +309,17 @@ describe('stale and exhausted windows', () => {
     const live = {
       status: 'success',
       windows: [
-        { id: 'five-hour', label: 'Live 5h', usedPercent: null, resetAtMs: NOW - HOUR },
-        { id: 'seven-day', label: 'Live 7d', usedPercent: 60, resetAtMs: NOW - HOUR },
+        { id: 'daily', label: 'Live daily', remainingPercent: null, resetAtMs: NOW - HOUR },
+        { id: 'weekly', label: 'Live weekly', remainingPercent: 40, resetAtMs: NOW - HOUR },
       ],
     };
-    const row = resolveLedgerRow('claude', { name: 'c.json', type: 'claude' }, live, NOW);
+    const row = resolveLedgerRow('devin', { name: 'd.json', type: 'devin' }, live, NOW);
     const markup = renderToStaticMarkup(
       createElement(LedgerWindowList, { windows: row.windows, nowMs: NOW })
     );
     expect(renderedWindows(markup)).toEqual([
-      { label: 'Live 5h', percent: 'Reset, awaiting data', limitReached: false },
-      { label: 'Live 7d', percent: '100%', limitReached: false },
+      { label: 'Live daily', percent: 'Reset, awaiting data', limitReached: false },
+      { label: 'Live weekly', percent: '100%', limitReached: false },
     ]);
   });
 
@@ -462,12 +462,12 @@ describe('stale and exhausted windows', () => {
 });
 
 describe('the newer whole reading', () => {
-  const claudeSnapshot: QuotaSnapshot = {
-    provider: 'claude',
+  const devinSnapshot: QuotaSnapshot = {
+    provider: 'devin',
     windows: [
       window({
-        id: 'seven_day',
-        class: 'claude:7d',
+        id: 'weekly',
+        class: 'devin:weekly',
         used_percent: 50,
         reset_at: iso(NOW + 2 * HOUR),
         observed_at: iso(NOW - 3 * HOUR),
@@ -482,9 +482,9 @@ describe('the newer whole reading', () => {
     fetchedAtMs,
     windows: [
       {
-        id: 'seven-day',
-        label: 'Live 7d',
-        usedPercent: 10,
+        id: 'weekly',
+        label: 'Live weekly',
+        remainingPercent: 90,
         resetAtMs: NOW + 4 * DAY,
         periodHours: 168,
       },
@@ -494,9 +494,9 @@ describe('the newer whole reading', () => {
     buildTimelineLane({
       name: 'a',
       displayName: 'a',
-      provider: 'claude',
+      provider: 'devin',
       quota: live(fetchedAtMs),
-      snapshot: claudeSnapshot,
+      snapshot: devinSnapshot,
       maxPeriodHours: 14 * 24,
     });
 
@@ -506,28 +506,28 @@ describe('the newer whole reading', () => {
     expect(fromSnapshot.remaining).toBe(50);
     expect(
       fromSnapshot.limits.map((limit) => [limit.labelKey ?? limit.label, limit.remaining])
-    ).toEqual([['claude_quota.seven_day', 50]]);
+    ).toEqual([['quota_management.ledger_window_weekly', 50]]);
 
     const fromLive = lane(NOW - 30 * 60 * 1000);
     expect(fromLive.anchorMs).toBe(NOW + 4 * DAY);
     expect(fromLive.remaining).toBe(90);
     expect(
       fromLive.limits.map((limit) => [limit.labelKey ?? limit.label, limit.remaining])
-    ).toEqual([['Live 7d', 90]]);
+    ).toEqual([['Live weekly', 90]]);
   });
 
   test('the soonest-recovery sort orders by the newer reading', () => {
     const entries = [
-      { type: 'claude' as const, file: { name: 'b.json', type: 'claude' } },
+      { type: 'devin' as const, file: { name: 'b.json', type: 'devin' } },
       {
-        type: 'claude' as const,
-        file: { name: 'a.json', type: 'claude', quota_snapshot: claudeSnapshot },
+        type: 'devin' as const,
+        file: { name: 'a.json', type: 'devin', quota_snapshot: devinSnapshot },
       },
     ];
     const order = (aFetchedAtMs: number) => {
       const quotas: Record<string, unknown> = {
         'a.json': live(aFetchedAtMs),
-        'b.json': { ...live(NOW), windows: [{ id: 'seven-day', resetAtMs: NOW + DAY }] },
+        'b.json': { ...live(NOW), windows: [{ id: 'weekly', resetAtMs: NOW + DAY }] },
       };
       return sortQuotaEntries(entries, 'soonest', (entry) =>
         nextRecoveryMs(

@@ -40,10 +40,10 @@ export interface QuotaRowInstant {
  * emphasis at all.
  */
 export function resetCreditRowId(
-  credit: { id?: string; expiresAt?: string },
+  credit: { id?: string; expires_at?: string | null },
   index: number
 ): string {
-  return credit.id || `${credit.expiresAt}-${index}`;
+  return credit.id || `${credit.expires_at}-${index}`;
 }
 
 /* Structural shapes — the five provider states disagree about where a window
@@ -53,12 +53,6 @@ export function resetCreditRowId(
 interface WindowLike {
   id?: string;
   resetAtMs?: number | null;
-}
-
-interface ResetCreditLike {
-  id?: string;
-  status?: string;
-  expiresAt?: string;
 }
 
 /** Row id used by the xAI weekly limit, which has no id of its own. */
@@ -95,32 +89,31 @@ export function collectQuotaRowInstants(
   const reading = newerQuotaReading(quota, snapshot?.provider === provider ? snapshot : null);
   if (reading === 'none') return [];
   if (reading === 'snapshot' && snapshot) {
-    return snapshot.windows
+    const windows = snapshot.windows
       .filter(isCapacityWindow)
       .map((window): QuotaRowInstant | null => {
         const atMs = parseIsoToMs(window.reset_at);
         return atMs === null ? null : { rowId: window.id, atMs, kind: 'window' };
-      })
-      .filter((instant): instant is QuotaRowInstant => instant !== null);
+      });
+    const credits =
+      snapshot.extras?.kind === 'codex'
+        ? (snapshot.extras.reset_credits?.value?.credits ?? []).map(
+            (credit, index): QuotaRowInstant | null => {
+              if (credit.status !== 'available') return null;
+              const atMs = parseIsoToMs(credit.expires_at);
+              return atMs === null
+                ? null
+                : { rowId: resetCreditRowId(credit, index), atMs, kind: 'credit' };
+            }
+          )
+        : [];
+    return [...windows, ...credits].filter(
+      (instant): instant is QuotaRowInstant => instant !== null
+    );
   }
 
-  if (provider === 'claude' || provider === 'codex' || provider === 'devin') {
-    const windows = collectRows((quota as { windows?: WindowLike[] }).windows ?? [], 'window');
-    if (provider !== 'codex') return windows;
-
-    const credits = (
-      (quota as { rateLimitResetCredits?: ResetCreditLike[] }).rateLimitResetCredits ?? []
-    )
-      .map((credit, index): QuotaRowInstant | null => {
-        if (credit.status !== 'available') return null;
-        const atMs = parseIsoToMs(credit.expiresAt);
-        return atMs === null
-          ? null
-          : { rowId: resetCreditRowId(credit, index), atMs, kind: 'credit' };
-      })
-      .filter((instant): instant is QuotaRowInstant => instant !== null);
-
-    return [...windows, ...credits];
+  if (provider === 'devin') {
+    return collectRows((quota as { windows?: WindowLike[] }).windows ?? [], 'window');
   }
 
   if (provider === 'xai') {

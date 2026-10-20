@@ -9,8 +9,6 @@ import { fileAuthIndex, listingCaughtUp } from '@/features/quota/snapshot/window
 import type {
   AntigravityQuotaState,
   AuthFileItem,
-  ClaudeQuotaState,
-  CodexQuotaState,
   DevinQuotaState,
   KimiQuotaState,
   MetaQuotaState,
@@ -24,8 +22,6 @@ interface QuotaStoreState {
   cacheGeneration: number;
   fileGenerations: Record<string, number>;
   antigravityQuota: Record<string, AntigravityQuotaState>;
-  claudeQuota: Record<string, ClaudeQuotaState>;
-  codexQuota: Record<string, CodexQuotaState>;
   devinQuota: Record<string, DevinQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
   metaQuota: Record<string, MetaQuotaState>;
@@ -35,8 +31,6 @@ interface QuotaStoreState {
   /** Loading and error of the last on-demand poll, by quota cache key. */
   quotaPolls: Record<string, SnapshotPollState>;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
-  setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
-  setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
   setDevinQuota: (updater: QuotaUpdater<Record<string, DevinQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setMetaQuota: (updater: QuotaUpdater<Record<string, MetaQuotaState>>) => void;
@@ -59,8 +53,6 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
   cacheGeneration: 0,
   fileGenerations: {},
   antigravityQuota: {},
-  claudeQuota: {},
-  codexQuota: {},
   devinQuota: {},
   kimiQuota: {},
   metaQuota: {},
@@ -70,14 +62,6 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
   setAntigravityQuota: (updater) =>
     set((state) => ({
       antigravityQuota: resolveUpdater(updater, state.antigravityQuota),
-    })),
-  setClaudeQuota: (updater) =>
-    set((state) => ({
-      claudeQuota: resolveUpdater(updater, state.claudeQuota),
-    })),
-  setCodexQuota: (updater) =>
-    set((state) => ({
-      codexQuota: resolveUpdater(updater, state.codexQuota),
     })),
   setDevinQuota: (updater) =>
     set((state) => ({
@@ -130,8 +114,6 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         return {
           fileGenerations,
           antigravityQuota: omitNames(state.antigravityQuota),
-          claudeQuota: omitNames(state.claudeQuota),
-          codexQuota: omitNames(state.codexQuota),
           devinQuota: omitNames(state.devinQuota),
           kimiQuota: omitNames(state.kimiQuota),
           metaQuota: omitNames(state.metaQuota),
@@ -143,8 +125,6 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         cacheGeneration: state.cacheGeneration + 1,
         fileGenerations: {},
         antigravityQuota: {},
-        claudeQuota: {},
-        codexQuota: {},
         devinQuota: {},
         kimiQuota: {},
         metaQuota: {},

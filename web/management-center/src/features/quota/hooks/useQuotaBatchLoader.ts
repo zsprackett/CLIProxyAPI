@@ -110,6 +110,7 @@ export function useQuotaBatchLoader() {
             results.forEach((result, index) => {
               const state = committedStates.get(result.cacheKey);
               if (result.status === 'success' && state) {
+                adapter.storeResult?.(entries[index].file, result.data);
                 void enrichQuotaInBackground(adapter, entries[index].file, result.data, state, t);
               }
             });

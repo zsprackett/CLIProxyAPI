@@ -48,6 +48,7 @@ export function useQuotaActions(disableControls: boolean) {
             ...prev,
             [cacheKey]: successState,
           }));
+          adapter.storeResult?.(file, data);
           void enrichQuotaInBackground(adapter, file, data, successState, t);
           showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
         });
@@ -94,6 +95,7 @@ export function useQuotaActions(disableControls: boolean) {
                 ...prev,
                 [cacheKey]: adapter.buildSuccessState(data),
               }));
+              adapter.storeResult?.(file, data);
               showNotification(t('codex_quota.reset_success', { name: file.name }), 'success');
             });
           } catch (err: unknown) {

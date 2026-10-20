@@ -37,10 +37,10 @@ const listed = (authIndex: string, snapshot: QuotaSnapshot | null): AuthFileItem
 });
 
 const shownPercent = (file: AuthFileItem) =>
-  (applyPolledSnapshot(file, useQuotaStore.getState().quotaSnapshots).quota_snapshot as
-    | QuotaSnapshot
-    | null
-    | undefined)?.windows[0]?.used_percent;
+  (
+    applyPolledSnapshot(file, useQuotaStore.getState().quotaSnapshots).quota_snapshot as
+      QuotaSnapshot | null | undefined
+  )?.windows[0]?.used_percent;
 
 beforeEach(() => {
   useQuotaStore.getState().clearQuotaCache();

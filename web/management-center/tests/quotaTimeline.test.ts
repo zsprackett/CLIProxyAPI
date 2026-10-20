@@ -13,8 +13,60 @@ import {
   windowsIn,
 } from '../src/features/quota/quotaTimelineModel';
 import type { TimelineLane } from '../src/features/quota/quotaTimelineModel';
+import type {
+  CodexResetCredit,
+  QuotaSnapshot,
+  QuotaWindow,
+} from '../src/features/quota/snapshot/types';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m, d, h, min).getTime();
+
+const snapWindow = (
+  id: string,
+  klass: string,
+  usedPercent: number,
+  resetAtMs: number | null,
+  periodHours: number
+): QuotaWindow => ({
+  id,
+  class: klass,
+  used_percent: usedPercent,
+  limit_reached: false,
+  reset_at: resetAtMs === null ? null : new Date(resetAtMs).toISOString(),
+  period_seconds: periodHours * 3600,
+  section: 'headers',
+  source: 'headers',
+  observed_at: null,
+});
+
+const okSection = <T>(value: T) => ({
+  status: 'ok' as const,
+  value,
+  value_at: null,
+  checked_at: null,
+});
+
+const laneSnapshot = (
+  provider: 'claude' | 'codex',
+  windows: QuotaWindow[],
+  credits: CodexResetCredit[] = []
+): QuotaSnapshot => ({
+  provider,
+  windows,
+  extras:
+    provider === 'codex'
+      ? {
+          kind: 'codex',
+          plan: okSection('plus'),
+          access: okSection({ allowed: true, limit_reached: false }),
+          credits: okSection({ has_credits: null, unlimited: null, balance: null }),
+          subscription: okSection({ active_until: null }),
+          reset_credits: okSection({ available: null, applicable_available: null, credits }),
+        }
+      : null,
+  last_poll: null,
+  updated_at: null,
+});
 
 describe('windowsIn', () => {
   test('projects backwards and forwards from the anchor', () => {
@@ -244,19 +296,17 @@ describe('buildTimelineLane', () => {
   test('claude/codex: anchors on the span-appropriate window, remaining from used', () => {
     const soon = at(2026, 6, 29, 20);
     const later = at(2026, 7, 1, 20);
-    const quota = {
-      status: 'success',
-      windows: [
-        { label: '7-day', usedPercent: 93, resetAtMs: later, periodHours: 168 },
-        { label: '5-hour', usedPercent: 20, resetAtMs: soon, periodHours: 5 },
-      ],
-    };
+    const snapshot = laneSnapshot('claude', [
+      snapWindow('seven_day', 'claude:7d', 93, later, 168),
+      snapWindow('five_hour', 'claude:5h', 20, soon, 5),
+    ]);
 
     // Fortnight view: the weekly window, even though the 5-hour resets sooner.
     const weekly = buildTimelineLane({
       ...base,
       provider: 'claude',
-      quota,
+      quota: undefined,
+      snapshot,
       maxPeriodHours: 14 * 24,
     });
     expect(weekly.anchorMs).toBe(later);
@@ -267,7 +317,8 @@ describe('buildTimelineLane', () => {
     const session = buildTimelineLane({
       ...base,
       provider: 'claude',
-      quota,
+      quota: undefined,
+      snapshot,
       maxPeriodHours: 3 * 24,
     });
     expect(session.anchorMs).toBe(soon);
@@ -275,9 +326,9 @@ describe('buildTimelineLane', () => {
     expect(session.remaining).toBe(80);
 
     // Every limit is still summarized in the lane head regardless of the pick.
-    expect(weekly.limits).toEqual([
-      { label: '7-day', remaining: 7 },
-      { label: '5-hour', remaining: 80 },
+    expect(weekly.limits.map((limit) => [limit.labelKey, limit.remaining])).toEqual([
+      ['claude_quota.seven_day', 7],
+      ['claude_quota.five_hour', 80],
     ]);
   });
 
@@ -287,25 +338,11 @@ describe('buildTimelineLane', () => {
     const lane = buildTimelineLane({
       ...base,
       provider: 'codex',
-      quota: {
-        status: 'success',
-        windows: [
-          {
-            id: 'weekly',
-            label: 'Weekly limit',
-            usedPercent: 70,
-            resetAtMs: accountReset,
-            periodHours: 168,
-          },
-          {
-            id: 'gpt-5-3-codex-spark-weekly-0',
-            label: 'GPT-5.3-Codex-Spark weekly limit',
-            usedPercent: 2,
-            resetAtMs: sparkReset,
-            periodHours: 168,
-          },
-        ],
-      },
+      quota: undefined,
+      snapshot: laneSnapshot('codex', [
+        snapWindow('secondary', 'codex:weekly', 70, accountReset, 168),
+        snapWindow('additional.GPT-5.3-Codex-Spark.secondary', '', 2, sparkReset, 168),
+      ]),
       maxPeriodHours: 14 * 24,
     });
 
@@ -319,25 +356,26 @@ describe('buildTimelineLane', () => {
     const lane = buildTimelineLane({
       ...base,
       provider: 'codex',
-      quota: {
-        status: 'success',
-        windows: [{ label: '7-day', usedPercent: 90, resetAtMs: 5000, periodHours: 168 }],
-        rateLimitResetCredits: [
+      quota: undefined,
+      snapshot: laneSnapshot(
+        'codex',
+        [snapWindow('secondary', 'codex:weekly', 90, 5000, 168)],
+        [
           {
             id: 'credit-1',
             status: 'available',
-            grantedAt: '2026-07-01T12:00:00Z',
-            expiresAt,
+            granted_at: '2026-07-01T12:00:00Z',
+            expires_at: expiresAt,
           },
           {
             id: 'spent',
             status: 'consumed',
-            grantedAt: '2026-07-01T12:00:00Z',
-            expiresAt,
+            granted_at: '2026-07-01T12:00:00Z',
+            expires_at: expiresAt,
           },
-          { id: 'invalid', status: 'available', grantedAt: '', expiresAt: 'not-a-date' },
-        ],
-      },
+          { id: 'invalid', status: 'available', granted_at: '', expires_at: 'not-a-date' },
+        ]
+      ),
     });
 
     expect(lane.resetCredits).toEqual([
@@ -472,10 +510,8 @@ describe('buildTimelineLane', () => {
     const drawable = buildTimelineLane({
       ...base,
       provider: 'claude',
-      quota: {
-        status: 'success',
-        windows: [{ label: '7-day', usedPercent: 10, resetAtMs: 5000, periodHours: 168 }],
-      },
+      quota: undefined,
+      snapshot: laneSnapshot('claude', [snapWindow('seven_day', 'claude:7d', 10, 5000, 168)]),
     });
     expect(laneHasWindow(drawable)).toBe(true);
     // Unloaded quota has nothing to show yet, so it takes no row.
@@ -509,13 +545,14 @@ describe('buildTimelineLane', () => {
   });
 
   test('windows without a reset instant do not anchor the lane', () => {
+    const withoutReset = laneSnapshot('claude', [
+      snapWindow('seven_day', 'claude:7d', 50, null, 168),
+    ]);
     const lane = buildTimelineLane({
       ...base,
       provider: 'claude',
-      quota: {
-        status: 'success',
-        windows: [{ label: '7-day', usedPercent: 50, resetAtMs: null, periodHours: 168 }],
-      },
+      quota: undefined,
+      snapshot: withoutReset,
     });
     expect(lane.anchorMs).toBeNull();
   });

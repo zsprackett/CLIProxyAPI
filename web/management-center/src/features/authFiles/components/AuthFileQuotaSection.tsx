@@ -13,10 +13,14 @@ import { isRuntimeOnlyAuthFile, type QuotaProviderType } from '@/features/authFi
 import { Button } from '@/components/ui/Button';
 import { IconRefreshCw } from '@/components/ui/icons';
 import { bindQuotaClasses } from '@/features/quota/types';
-import { WindowList } from '@/features/quota/snapshot/WindowList';
-import { newerQuotaReading, readQuotaSnapshot } from '@/features/quota/snapshot/windows';
+import {
+  applyPolledSnapshot,
+  newerQuotaReading,
+  readQuotaSnapshot,
+} from '@/features/quota/snapshot/windows';
 import { useNow } from '@/hooks/useNow';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '@/features/quota/providers';
+import { SnapshotBody } from '@/features/quota/providers/snapshotBodies';
 import styles from './AuthFileQuota.module.scss';
 
 /** Compact quota classes of the auth-file card; a missing class key throws at module load. */
@@ -49,8 +53,9 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
   const storedQuota = useQuotaStore((state) => {
     if (quotaType === 'antigravity')
       return state.antigravityQuota[cacheKey] as QuotaCardState | undefined;
-    if (quotaType === 'claude') return state.claudeQuota[cacheKey] as QuotaCardState | undefined;
-    if (quotaType === 'codex') return state.codexQuota[cacheKey] as QuotaCardState | undefined;
+    if (quotaType === 'claude' || quotaType === 'codex') {
+      return state.quotaPolls[cacheKey] as QuotaCardState | undefined;
+    }
     if (quotaType === 'devin') return state.devinQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'kimi') return state.kimiQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'meta') return state.metaQuota[cacheKey] as QuotaCardState | undefined;
@@ -58,6 +63,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
     return assertNever(quotaType);
   });
   const quota = storedQuota;
+  const polledSnapshots = useQuotaStore((state) => state.quotaSnapshots);
 
   const updateQuotaState = useQuotaStore(
     (state) => state[adapter.storeSetter] as unknown as QuotaMapUpdater
@@ -83,6 +89,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
           ...prev,
           [cacheKey]: adapter.buildSuccessState(data),
         }));
+        adapter.storeResult?.(file, data);
         showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
       });
     } catch (err: unknown) {
@@ -135,6 +142,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
               ...prev,
               [cacheKey]: adapter.buildSuccessState(data),
             }));
+            adapter.storeResult?.(file, data);
             showNotification(t('codex_quota.reset_success', { name: file.name }), 'success');
           });
         } catch (err: unknown) {
@@ -161,11 +169,15 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
   ]);
 
   const quotaStatus = quota?.status ?? 'idle';
-  const snapshot = readQuotaSnapshot(quotaType, file.quota_snapshot);
+  const snapshot = readQuotaSnapshot(
+    quotaType,
+    applyPolledSnapshot(file, polledSnapshots).quota_snapshot
+  );
   const showSnapshot = newerQuotaReading(quota, snapshot) === 'snapshot';
   const canRefreshQuota = !disableControls && !file.disabled && !resettingQuota;
   const canUseResetQuota = canRefreshQuota && quotaStatus !== 'loading';
-  const showResetQuotaAction = quota !== undefined && Boolean(adapter.canResetQuota?.(quota));
+  const showResetQuotaAction =
+    showSnapshot && snapshot !== null && Boolean(adapter.canResetQuota?.(snapshot));
   const resetQuotaAction =
     adapter.resetQuota && showResetQuotaAction ? (
       <Button
@@ -192,12 +204,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
   return (
     <div className={styles.quotaSection}>
       {showSnapshot && snapshot && (
-        <WindowList
-          provider={snapshot.provider}
-          snapshot={snapshot}
-          windows={snapshot.windows}
-          nowMs={nowMs}
-        />
+        <SnapshotBody snapshot={snapshot} classes={compactQuotaClasses} nowMs={nowMs} />
       )}
       {quotaStatus === 'loading' ? (
         <div className={styles.quotaMessage}>{t(`${adapter.i18nPrefix}.loading`)}</div>
@@ -216,12 +223,12 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
             message: quotaErrorMessage,
           })}
         </div>
-      ) : showSnapshot ? null : quota ? (
+      ) : showSnapshot ? null : quota && adapter.Body ? (
         <adapter.Body quota={quota} classes={compactQuotaClasses} />
       ) : (
         <div className={styles.quotaMessage}>{t(`${adapter.i18nPrefix}.idle`)}</div>
       )}
-      {quotaStatus !== 'idle' && (resetQuotaAction || quotaType === 'devin') && (
+      {(resetQuotaAction || (quotaStatus !== 'idle' && quotaType === 'devin')) && (
         <div className={styles.quotaCardActions}>
           {resetQuotaAction}
           {quotaType === 'devin' && (

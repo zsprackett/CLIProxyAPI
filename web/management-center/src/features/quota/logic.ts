@@ -5,11 +5,10 @@
 
 import type { AuthFileItem } from '@/types';
 import { ANTIGRAVITY_CONFIG } from './providers/antigravity/data';
-import { CLAUDE_CONFIG } from './providers/claude/data';
-import { CODEX_CONFIG } from './providers/codex/data';
 import { DEVIN_CONFIG } from './providers/devin/data';
 import { KIMI_CONFIG } from './providers/kimi/data';
 import { META_CONFIG } from './providers/meta/data';
+import { CLAUDE_CONFIG, CODEX_CONFIG } from './providers/snapshotPoll';
 import { XAI_CONFIG } from './providers/xai/data';
 import type { QuotaProviderType } from './providers/types';
 import { readQuotaSnapshot } from './snapshot/windows';

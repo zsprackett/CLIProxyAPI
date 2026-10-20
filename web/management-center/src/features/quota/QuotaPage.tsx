@@ -64,7 +64,7 @@ import {
   type QuotaFileEntry,
 } from './logic';
 import { nextRecoveryMs } from './resetSchedule';
-import { readQuotaSnapshot } from './snapshot/windows';
+import { applyPolledSnapshot, readQuotaSnapshot } from './snapshot/windows';
 import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from './providers';
 import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
@@ -170,8 +170,8 @@ export function QuotaPage() {
    * 排在归类/排序之前：「最快恢复优先」要读它算排序键。 */
 
   const antigravityQuota = useQuotaStore((state) => state.antigravityQuota);
-  const claudeQuota = useQuotaStore((state) => state.claudeQuota);
-  const codexQuota = useQuotaStore((state) => state.codexQuota);
+  const quotaPolls = useQuotaStore((state) => state.quotaPolls);
+  const quotaSnapshots = useQuotaStore((state) => state.quotaSnapshots);
   const devinQuota = useQuotaStore((state) => state.devinQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
   const metaQuota = useQuotaStore((state) => state.metaQuota);
@@ -181,14 +181,14 @@ export function QuotaPage() {
     () =>
       ({
         antigravity: antigravityQuota,
-        claude: claudeQuota,
-        codex: codexQuota,
+        claude: quotaPolls,
+        codex: quotaPolls,
         devin: devinQuota,
         kimi: kimiQuota,
         meta: metaQuota,
         xai: xaiQuota,
       }) as unknown as Record<QuotaProviderType, Record<string, QuotaCardState>>,
-    [antigravityQuota, claudeQuota, codexQuota, devinQuota, kimiQuota, metaQuota, xaiQuota]
+    [antigravityQuota, quotaPolls, devinQuota, kimiQuota, metaQuota, xaiQuota]
   );
 
   const getQuota = useCallback(
@@ -204,7 +204,11 @@ export function QuotaPage() {
   const tick = useNow(sortMode !== 'default');
   const sortNow = sortMode === 'default' ? 0 : tick;
 
-  const entries = useMemo(() => classifyQuotaFiles(files), [files]);
+  // A click's poll result stands in for the listing snapshot until the listing catches up.
+  const entries = useMemo(
+    () => classifyQuotaFiles(files.map((file) => applyPolledSnapshot(file, quotaSnapshots))),
+    [files, quotaSnapshots]
+  );
   const tabCounts = useMemo(() => buildTabCounts(entries), [entries]);
   const filteredEntries = useMemo(
     () => filterEntriesBySearch(filterEntriesByTab(entries, tab), search),
@@ -368,16 +372,22 @@ export function QuotaPage() {
     [entries, quotaByType]
   );
 
-  // 剪枝：文件列表落定后，各 provider 缓存只保留仍存在的凭证
+  // Pruning: once the file list settles, each quota cache keeps only the
+  // credentials that still exist. Claude and Codex share one card-state map.
   useEffect(() => {
     if (loading || error || filesGeneration !== sessionGeneration) return;
-    const survivorsByType = new Map<QuotaProviderType, Set<string>>(
-      QUOTA_TAB_ORDER.map((type) => [type, new Set<string>()])
+    const survivorsBySetter = new Map<string, Set<string>>(
+      QUOTA_TAB_ORDER.map((type) => [QUOTA_ADAPTERS[type].storeSetter, new Set<string>()])
     );
-    entries.forEach((entry) => survivorsByType.get(entry.type)?.add(getQuotaCacheKey(entry.file)));
+    entries.forEach((entry) =>
+      survivorsBySetter
+        .get(QUOTA_ADAPTERS[entry.type].storeSetter)
+        ?.add(getQuotaCacheKey(entry.file))
+    );
 
-    QUOTA_TAB_ORDER.forEach((type) => {
-      const survivors = survivorsByType.get(type) ?? new Set<string>();
+    survivorsBySetter.forEach((survivors, storeSetter) => {
+      const type = QUOTA_TAB_ORDER.find((tab) => QUOTA_ADAPTERS[tab].storeSetter === storeSetter);
+      if (!type) return;
       const setQuota = getQuotaSetter(QUOTA_ADAPTERS[type]);
       setQuota((prev) => {
         const staleKeys = Object.keys(prev).filter((name) => !survivors.has(name));
@@ -387,7 +397,8 @@ export function QuotaPage() {
         return next;
       });
     });
-  }, [entries, error, filesGeneration, loading, sessionGeneration]);
+    useQuotaStore.getState().reconcileQuotaSnapshots(files);
+  }, [entries, error, files, filesGeneration, loading, sessionGeneration]);
 
   /* ---------- 加载与操作 ---------- */
 
