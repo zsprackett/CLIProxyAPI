@@ -347,6 +347,9 @@ func checkSystemInstructionsWithSigningModeAt(
 
 	billingText := generateBillingHeader(cchSigning, version, messageText, entrypoint, workload, isSubagent, prevReq, promptID, turnOrigin...)
 	billingBlock := buildTextBlock(billingText, nil)
+	if !strictMode && helps.IsClaudeAutoModeClassifierRequest(payload) {
+		return keepClaudeClassifierSystemPrompt(payload, system, billingBlock)
+	}
 	agentBlock := buildTextBlock(claudeCodeCLIIdentity, &claudeCodeCacheControl)
 
 	systemBlocks := []string{billingBlock, agentBlock}
@@ -581,6 +584,31 @@ func validateClaudeCallerSystemBlocks(system gjson.Result) error {
 		return true
 	})
 	return blockErr
+}
+
+// keepClaudeClassifierSystemPrompt sends the auto-mode classifier in the shape
+// Claude Code itself uses: the billing header, then the caller's own system
+// blocks with their cache_control. It adds no CLI identity block, no
+// mid-conversation system turn, and no date reminder. The classifier's
+// messages are all user turns with the transcript last, so relocating its
+// system prompt would put the large stable prompt after the volatile
+// transcript and defeat prompt caching on every call.
+func keepClaudeClassifierSystemPrompt(payload []byte, system gjson.Result, billingBlock string) []byte {
+	blocks := []string{billingBlock}
+	if system.Type == gjson.String {
+		if text := system.String(); strings.TrimSpace(text) != "" && !util.IsClaudeCodeAttributionSystemText(text) {
+			blocks = append(blocks, buildTextBlock(text, nil))
+		}
+	}
+	system.ForEach(func(_, part gjson.Result) bool {
+		text := part.Get("text").String()
+		if part.Get("type").String() == "text" && strings.TrimSpace(text) != "" && !util.IsClaudeCodeAttributionSystemText(text) {
+			blocks = append(blocks, part.Raw)
+		}
+		return true
+	})
+	payload, _ = sjson.SetRawBytes(payload, "system", []byte("["+strings.Join(blocks, ",")+"]"))
+	return payload
 }
 
 func collectForwardedClaudeSystemPromptBlocks(system gjson.Result) []string {
