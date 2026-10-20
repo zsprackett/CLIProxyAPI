@@ -20,6 +20,36 @@ type CodexQuotaSources struct {
 	SubscriptionErr error
 	ResetCredits    []byte
 	ResetCreditsErr error
+	// Credential holds the plan and the subscription end stored with the
+	// credential. They stand in when the upstream leaves them out, or when
+	// its request fails or is skipped.
+	Credential CodexCredentialQuota
+}
+
+// CodexCredentialQuota is the plan and the subscription end stored with a
+// ChatGPT-login credential.
+type CodexCredentialQuota struct {
+	Plan        string
+	ActiveUntil time.Time
+}
+
+// CodexCredentialQuotaFrom reads the plan and the subscription end from the
+// stored credential sources, first match wins, as the management panel did:
+// the metadata, its id_token claims, the attributes, their id_token claims.
+func CodexCredentialQuotaFrom(sources ...gjson.Result) CodexCredentialQuota {
+	var credential CodexCredentialQuota
+	for _, source := range sources {
+		if credential.Plan == "" {
+			credential.Plan = strings.ToLower(strings.TrimSpace(firstCodexQuotaResultString(source, "plan_type", "planType", "chatgpt_plan_type")))
+		}
+		if credential.ActiveUntil.IsZero() {
+			credential.ActiveUntil, _ = parseQuotaInstant(firstCodexQuotaResult(source,
+				"chatgpt_subscription_active_until", "chatgptSubscriptionActiveUntil",
+				"subscription_active_until", "subscriptionActiveUntil",
+				"subscription.active_until", "subscription.activeUntil"))
+		}
+	}
+	return credential
 }
 
 // CodexQuotaObservation builds the poll observation of a ChatGPT-login Codex
@@ -40,6 +70,9 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 		obs.Sections[cliproxyauth.SectionCodexUsage] = cliproxyauth.SectionFailed
 		msg := src.UsageErr.Error()
 		extras.Plan = cliproxyauth.FailedSection[string](msg, now)
+		if plan := src.Credential.Plan; plan != "" {
+			extras.Plan.Value, extras.Plan.ValueAt = &plan, now
+		}
 		extras.Access = cliproxyauth.FailedSection[cliproxyauth.CodexAccess](msg, now)
 		extras.Credits = cliproxyauth.FailedSection[cliproxyauth.CodexCredits](msg, now)
 	} else {
@@ -47,7 +80,11 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 		root := gjson.ParseBytes(src.Usage)
 		obs.Windows = codexUsageQuotaWindows(root, now)
 		rateLimit := firstCodexQuotaResult(root, "rate_limit", "rateLimit")
-		extras.Plan = cliproxyauth.OKSection(strings.ToLower(strings.TrimSpace(firstCodexQuotaResultString(root, "plan_type", "planType"))), now)
+		plan := strings.ToLower(strings.TrimSpace(firstCodexQuotaResultString(root, "plan_type", "planType")))
+		if plan == "" {
+			plan = src.Credential.Plan
+		}
+		extras.Plan = cliproxyauth.OKSection(plan, now)
 		extras.Access = cliproxyauth.OKSection(cliproxyauth.CodexAccess{
 			Allowed:      codexQuotaBool(rateLimit.Get("allowed")),
 			LimitReached: codexQuotaBool(firstCodexQuotaResult(rateLimit, "limit_reached", "limitReached")),
@@ -55,12 +92,22 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 		extras.Credits = cliproxyauth.OKSection(codexUsageCredits(root.Get("credits")), now)
 		usageCounts = codexResetCreditCounts(firstCodexQuotaResult(root, "rate_limit_reset_credits", "rateLimitResetCredits"))
 	}
+	storedSubscription := cliproxyauth.CodexSubscription{ActiveUntil: cliproxyauth.Instant{Time: src.Credential.ActiveUntil}}
 	switch {
 	case src.SubscriptionErr != nil:
 		extras.Subscription = cliproxyauth.FailedSection[cliproxyauth.CodexSubscription](src.SubscriptionErr.Error(), now)
+		if !src.Credential.ActiveUntil.IsZero() {
+			extras.Subscription.Value, extras.Subscription.ValueAt = &storedSubscription, now
+		}
 	case src.Subscription != nil:
-		activeUntil, _ := parseQuotaInstant(firstCodexQuotaResult(gjson.ParseBytes(src.Subscription), "active_until", "activeUntil"))
+		activeUntil, ok := parseQuotaInstant(firstCodexQuotaResult(gjson.ParseBytes(src.Subscription), "active_until", "activeUntil"))
+		if !ok {
+			activeUntil = src.Credential.ActiveUntil
+		}
 		extras.Subscription = cliproxyauth.OKSection(cliproxyauth.CodexSubscription{ActiveUntil: cliproxyauth.Instant{Time: activeUntil}}, now)
+	case !src.Credential.ActiveUntil.IsZero():
+		// No account id, so the subscription request was skipped.
+		extras.Subscription = cliproxyauth.OKSection(storedSubscription, now)
 	}
 	resetCreditsFailed := func(msg string) {
 		extras.ResetCredits = cliproxyauth.FailedSection[cliproxyauth.CodexResetCredits](msg, now)

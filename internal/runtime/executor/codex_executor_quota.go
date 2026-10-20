@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -33,7 +35,7 @@ func (e *CodexExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth, 
 		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
 	accountID := codexQuotaAccountID(auth)
-	var src helps.CodexQuotaSources
+	src := helps.CodexQuotaSources{Credential: codexQuotaCredential(auth)}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -80,6 +82,37 @@ func codexQuotaAccountID(auth *cliproxyauth.Auth) string {
 		}
 	}
 	return ""
+}
+
+// codexQuotaCredential reads the plan and the subscription end stored with the
+// credential, from its metadata and attributes and their id_token claims.
+func codexQuotaCredential(auth *cliproxyauth.Auth) helps.CodexCredentialQuota {
+	metadataToken, _ := auth.Metadata["id_token"].(string)
+	return helps.CodexCredentialQuotaFrom(
+		codexQuotaJSON(auth.Metadata),
+		codexQuotaIDTokenClaims(metadataToken),
+		codexQuotaJSON(auth.Attributes),
+		codexQuotaIDTokenClaims(auth.Attributes["id_token"]),
+	)
+}
+
+func codexQuotaIDTokenClaims(raw string) gjson.Result {
+	if strings.TrimSpace(raw) == "" {
+		return gjson.Result{}
+	}
+	claims, errParse := codexauth.ParseJWTToken(raw)
+	if errParse != nil {
+		return gjson.Result{}
+	}
+	return codexQuotaJSON(claims.CodexAuthInfo)
+}
+
+func codexQuotaJSON(value any) gjson.Result {
+	raw, errMarshal := json.Marshal(value)
+	if errMarshal != nil {
+		return gjson.Result{}
+	}
+	return gjson.ParseBytes(raw)
 }
 
 func (e *CodexExecutor) fetchCodexQuotaJSON(ctx context.Context, auth *cliproxyauth.Auth, rawURL, accountID string, extra map[string]string) ([]byte, error) {
