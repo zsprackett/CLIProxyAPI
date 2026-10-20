@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { formatInstantShort, formatRelativeInstant } from '@/utils/quota';
 import { remainingTone } from '../components/ledgerTone';
 import styles from '../components/QuotaLedger.module.scss';
+import { collectQuotaRowInstants, pickUrgentRowId } from '../resetSchedule';
 import { snapshotLedgerWindows, type LedgerWindow } from '../ledgerModel';
 import type { QuotaProviderKind, QuotaSnapshot, QuotaWindow } from './types';
 
@@ -26,6 +27,7 @@ const CLASS_KEYS = [
   'toneUnknown',
   'windowReset',
   'resetRelative',
+  'resetRelativeSoon',
 ] as const;
 
 export type WindowListClasses = Record<(typeof CLASS_KEYS)[number], string>;
@@ -37,11 +39,18 @@ const LEDGER_CLASSES = Object.fromEntries(
 export interface LedgerWindowListProps {
   windows: readonly LedgerWindow[];
   nowMs: number;
+  /** The row that recovers first within the hour; it gets the warning countdown and a hint. */
+  soonestRowId?: string | null;
   classes?: Partial<WindowListClasses>;
 }
 
 /** Renders ledger windows, from a live reading or from a snapshot. */
-export function LedgerWindowList({ windows, nowMs, classes }: LedgerWindowListProps) {
+export function LedgerWindowList({
+  windows,
+  nowMs,
+  soonestRowId = null,
+  classes,
+}: LedgerWindowListProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage;
   const cls = { ...LEDGER_CLASSES, ...classes };
@@ -53,8 +62,13 @@ export function LedgerWindowList({ windows, nowMs, classes }: LedgerWindowListPr
     const known = window.remaining !== null;
     const resetAtMs =
       window.resetAtMs !== null && window.resetAtMs > nowMs ? window.resetAtMs : null;
+    const soon = window.id === soonestRowId;
     return (
-      <div key={window.id} className={cls.window}>
+      <div
+        key={window.id}
+        className={cls.window}
+        title={soon ? t('quota_management.soonest_row_hint') : undefined}
+      >
         <div className={cls.windowHead}>
           <span className={cls.windowLabel}>{label}</span>
           <span className={cls.windowPercent}>
@@ -88,7 +102,11 @@ export function LedgerWindowList({ windows, nowMs, classes }: LedgerWindowListPr
             t('quota_management.ledger_no_reset')
           ) : (
             <>
-              <span className={cls.resetRelative}>
+              <span
+                className={
+                  soon ? `${cls.resetRelative} ${cls.resetRelativeSoon}` : cls.resetRelative
+                }
+              >
                 {formatRelativeInstant(resetAtMs, nowMs, locale)}
               </span>
               {' · '}
@@ -111,12 +129,22 @@ export interface WindowListProps {
   classes?: Partial<WindowListClasses>;
 }
 
-/** Renders windows of a backend quota snapshot. */
+/**
+ * Renders windows of a backend quota snapshot.
+ *
+ * The urgent row is picked among every recovery instant of the snapshot, so a
+ * Codex card marks one row across its windows and its reset credits.
+ */
 export function WindowList({ provider, snapshot, windows, nowMs, classes }: WindowListProps) {
+  const soonestRowId = pickUrgentRowId(
+    collectQuotaRowInstants(provider, undefined, snapshot),
+    nowMs
+  );
   return (
     <LedgerWindowList
       windows={snapshotLedgerWindows(provider, snapshot, windows, nowMs)}
       nowMs={nowMs}
+      soonestRowId={soonestRowId}
       classes={classes}
     />
   );

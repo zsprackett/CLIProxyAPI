@@ -206,6 +206,33 @@ describe('stale and exhausted windows', () => {
     expect(nextRecoveryMs('xai', undefined, NOW, monthlyOnly)).toBeNull();
   });
 
+  test('xAI marks its weekly window inside the final hour, never the monthly cap', () => {
+    const closing: QuotaSnapshot = {
+      ...xai,
+      windows: [
+        window({
+          id: 'weekly',
+          class: 'xai:weekly',
+          used_percent: 42,
+          section: 'xai.weekly',
+          reset_at: iso(NOW + 30 * 60 * 1000),
+        }),
+        window({
+          id: 'monthly',
+          class: 'xai:monthly',
+          used_percent: 10,
+          section: 'xai.monthly',
+          reset_at: iso(NOW + 10 * 60 * 1000),
+        }),
+      ],
+    };
+    const markup = render(closing);
+    expect(markup.match(/title="Recovers first on this credential"/g)?.length).toBe(1);
+    expect(markup).toMatch(
+      /<div class="window" title="[^"]*"><div class="windowHead"><span class="windowLabel">Weekly limit/
+    );
+  });
+
   test('a Codex window at its limit with no percent shows limit reached and 0%', () => {
     const codex: QuotaSnapshot = {
       provider: 'codex',
