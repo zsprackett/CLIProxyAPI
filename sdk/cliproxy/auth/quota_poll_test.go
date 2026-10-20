@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ type quotaPollingExecutor struct {
 	polled  chan PollTrigger
 	// release, when set, holds PollQuota after it reported on polled.
 	release chan struct{}
+	// panicValue, when set, makes PollQuota panic with it.
+	panicValue any
 }
 
 func (e *quotaPollingExecutor) Identifier() string { return e.id }
@@ -38,12 +41,19 @@ func (e *quotaPollingExecutor) HttpRequest(context.Context, *Auth, *http.Request
 func (e *quotaPollingExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, error) {
 	return auth, nil
 }
-func (e *quotaPollingExecutor) PollQuota(_ context.Context, auth *Auth, trigger PollTrigger) (QuotaObservation, error) {
+func (e *quotaPollingExecutor) PollQuota(ctx context.Context, auth *Auth, trigger PollTrigger) (QuotaObservation, error) {
 	if e.polled != nil {
 		e.polled <- trigger
 	}
 	if e.release != nil {
 		<-e.release
+	}
+	if e.panicValue != nil {
+		panic(e.panicValue)
+	}
+	// A real poller's HTTP client gives up once its context is cancelled.
+	if errCtx := ctx.Err(); errCtx != nil {
+		return QuotaObservation{}, errCtx
 	}
 	if e.err != nil {
 		return QuotaObservation{}, e.err
@@ -664,6 +674,133 @@ func TestPollQuotaNowJoinsInFlightPoll(t *testing.T) {
 	if first.LastPoll.Trigger != PollOnDemand {
 		t.Fatalf("trigger = %v, want on_demand", first.LastPoll.Trigger)
 	}
+}
+
+// A client that aborts its request does not abort the shared poll: the
+// joiner gets the real result and the stored snapshot carries no cancellation.
+func TestPollQuotaNowSurvivesStarterCancel(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), polled: make(chan PollTrigger), release: make(chan struct{})}
+	manager := newTickPollManager(t, exec, clock)
+	joined := make(chan struct{})
+	manager.quotaPoll.joined = func() { joined <- struct{}{} }
+
+	starterCtx, cancelStarter := context.WithCancel(context.Background())
+	defer cancelStarter()
+	starterErr := make(chan error, 1)
+	go func() {
+		_, errPoll := manager.PollQuotaNow(starterCtx, "claude-a")
+		starterErr <- errPoll
+	}()
+	awaitPoll(t, exec.polled, PollOnDemand)
+	joinerResult := make(chan QuotaSnapshot, 1)
+	go func() {
+		snapshot, errPoll := manager.PollQuotaNow(context.Background(), "claude-a")
+		if errPoll != nil {
+			t.Errorf("joiner PollQuotaNow: %v", errPoll)
+		}
+		joinerResult <- snapshot
+	}()
+	select {
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second call did not join the poll in flight")
+	}
+
+	cancelStarter()
+	exec.release <- struct{}{}
+	select {
+	case errPoll := <-starterErr:
+		if !errors.Is(errPoll, context.Canceled) {
+			t.Fatalf("starter error = %v, want its own context.Canceled", errPoll)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("starter did not return after its cancel")
+	}
+	snapshot := <-joinerResult
+	if snapshot.LastPoll == nil || snapshot.LastPoll.Error != "" || len(snapshot.Windows) != 2 {
+		t.Fatalf("joiner snapshot = %+v, want the real result", snapshot)
+	}
+	stored, _ := manager.GetByID("claude-a")
+	if stored.QuotaSnapshot.LastPoll == nil || stored.QuotaSnapshot.LastPoll.Error != "" {
+		t.Fatalf("stored last poll = %+v, want no error", stored.QuotaSnapshot.LastPoll)
+	}
+	awaitIdle(manager, "claude-a")
+	if !manager.quotaPoll.due("claude-a", clock.Now().Add(time.Hour), time.Minute) {
+		t.Fatal("the credential is still marked in flight")
+	}
+}
+
+// A poller that panics fails that one poll and leaves the credential pollable.
+func TestPollQuotaNowRecoversFromPollerPanic(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), panicValue: "boom"}
+	manager := newTickPollManager(t, exec, clock)
+	ctx := context.Background()
+
+	snapshot, errPoll := manager.PollQuotaNow(ctx, "claude-a")
+	if errPoll != nil {
+		t.Fatalf("a poller panic returned an error: %v", errPoll)
+	}
+	if snapshot.LastPoll == nil || !strings.Contains(snapshot.LastPoll.Error, "boom") {
+		t.Fatalf("last poll = %+v, want the panic as the poll error", snapshot.LastPoll)
+	}
+
+	exec.panicValue = nil
+	done := make(chan QuotaSnapshot, 1)
+	go func() {
+		next, errNext := manager.PollQuotaNow(ctx, "claude-a")
+		if errNext != nil {
+			t.Errorf("second PollQuotaNow: %v", errNext)
+		}
+		done <- next
+	}()
+	select {
+	case next := <-done:
+		if next.LastPoll == nil || next.LastPoll.Error != "" || len(next.Windows) != 2 {
+			t.Fatalf("second poll = %+v, want a clean result", next)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the credential stayed in flight after the panic")
+	}
+}
+
+// A credential removed while polling is disabled is forgotten, so when it
+// comes back it is polled at once instead of waiting out the old interval.
+func TestRunQuotaPollTicksForgetsRemovedCredentialWhileDisabled(t *testing.T) {
+	start := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: start}
+	exec := &quotaPollingExecutor{id: "claude", headers: claudePollHeaders("0.3", "0.5"), polled: make(chan PollTrigger)}
+	manager := newTickPollManager(t, exec, clock)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ticks := make(chan time.Time)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		manager.runQuotaPollTicks(ctx, ticks)
+	}()
+	tick := func(offset time.Duration) {
+		awaitIdle(manager, "claude-a")
+		clock.Set(start.Add(offset))
+		ticks <- clock.Now()
+	}
+
+	tick(0)
+	awaitPoll(t, exec.polled, PollBackground)
+	awaitIdle(manager, "claude-a")
+	manager.runtimeConfig.Store(&internalconfig.Config{QuotaPollIntervalSeconds: 0})
+	manager.Remove(ctx, "claude-a")
+	tick(30 * time.Second)
+
+	if _, errRegister := manager.Register(WithSkipPersist(ctx), &Auth{ID: "claude-a", Provider: "claude", Status: StatusActive}); errRegister != nil {
+		t.Fatalf("register again: %v", errRegister)
+	}
+	manager.runtimeConfig.Store(&internalconfig.Config{QuotaPollIntervalSeconds: 60})
+	tick(40 * time.Second)
+	awaitPoll(t, exec.polled, PollBackground)
+	cancel()
+	<-done
 }
 
 func TestPollQuotaNowErrors(t *testing.T) {
