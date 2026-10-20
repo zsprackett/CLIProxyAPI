@@ -37,12 +37,25 @@ const render = (snapshot: QuotaSnapshot, nowMs = NOW) =>
 /** Label and percent of each rendered window, in order. */
 const windowRows = (markup: string) =>
   markup
-    .split('<div class="window">')
+    .split(/<div class="window"[^>]*>/)
     .slice(1)
     .map((chunk) => {
       const text = (className: string) =>
         new RegExp(`<span class="${className}">([^<]*)</span>`).exec(chunk)?.[1] ?? null;
       return [text('windowLabel'), text('windowPercent')];
+    });
+
+const SOONEST_HINT = 'Recovers first on this credential';
+
+/** Labels of the windows marked as the row that recovers first, with their countdown class. */
+const soonWindows = (markup: string) =>
+  markup
+    .split(/(?=<div class="window")/)
+    .slice(1)
+    .filter((chunk) => chunk.startsWith(`<div class="window" title="${SOONEST_HINT}">`))
+    .map((chunk) => {
+      expect(chunk).toContain('<span class="resetRelative resetRelativeSoon">');
+      return /<span class="windowLabel">([^<]*)<\/span>/.exec(chunk)?.[1];
     });
 
 const withExtras = (snapshot: QuotaSnapshot, patch: Partial<QuotaExtras>): QuotaSnapshot => ({
@@ -62,6 +75,19 @@ describe('Claude card from the Go golden snapshot', () => {
       ['7-day Fable 5', 'Unknown'],
     ]);
     expect(markup).not.toContain('Extra Usage');
+  });
+
+  test('marks the window that resets within the hour and no other', () => {
+    const halfHourBeforeFiveHourReset = Date.parse('2026-10-19T19:30:00Z');
+    const markup = render(golden('claude'), halfHourBeforeFiveHourReset);
+    expect(soonWindows(markup)).toEqual(['5-hour limit']);
+    expect(markup.match(/resetRelativeSoon/g)?.length).toBe(1);
+  });
+
+  test('marks no window while every reset is more than an hour away', () => {
+    const markup = render(golden('claude'));
+    expect(markup).not.toContain(SOONEST_HINT);
+    expect(markup).not.toContain('resetRelativeSoon');
   });
 
   test('shows enabled extra usage in dollars', () => {
@@ -118,6 +144,30 @@ describe('Codex card from a contract-shaped snapshot', () => {
     expect(markup).toContain(formatInstantShort(CODEX_EXPIRING_CREDIT_AT));
     expect(markup).toMatch(/11 days/);
     expect(markup.match(/codexResetCreditRowSoon/g)?.length).toBe(1);
+  });
+
+  test('marks the reset credit that expires first when it beats every window', () => {
+    const markup = render(codexSnapshot(), CODEX_NOW);
+    expect(soonWindows(markup)).toEqual([]);
+    expect(markup.match(/codexResetCreditRowSoon/g)?.length).toBe(1);
+    expect(markup.match(new RegExp(SOONEST_HINT, 'g'))?.length).toBe(1);
+  });
+
+  test('marks the window that resets first, and not the credit, when a window beats every credit', () => {
+    const snapshot = codexSnapshot();
+    const firstWindow = snapshot.windows[0];
+    const earlier: QuotaSnapshot = {
+      ...snapshot,
+      windows: [
+        { ...firstWindow, reset_at: new Date(CODEX_NOW + 10 * 60 * 1000).toISOString() },
+        ...snapshot.windows.slice(1),
+      ],
+    };
+    const markup = render(earlier, CODEX_NOW);
+    expect(soonWindows(markup)).toEqual(['5-hour limit']);
+    expect(markup).not.toContain('codexResetCreditRowSoon');
+    expect(markup.match(new RegExp(SOONEST_HINT, 'g'))?.length).toBe(1);
+    expect(markup.match(/resetRelativeSoon/g)?.length).toBe(1);
   });
 
   test('shows unlimited credits instead of a balance', () => {
