@@ -6,6 +6,7 @@
 #   --dir DIR    install dir (default: the unit's WorkingDirectory)
 #   --port N     health port (default: first "port:" in DIR/config.yaml, else 8317)
 #   --build-only build and stage the release, change nothing live
+# Needs "disable-auto-update-panel: true" in DIR/config.yaml, else the server replaces the panel.
 # Exit: 0 deployed, 1 unhealthy but rolled back, 2 rollback failed too, 3 nothing changed.
 set -euo pipefail
 
@@ -13,7 +14,7 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 unit=cli-proxy-api.service ref=origin/main dir="" port="" build_only=0
 
 die() { echo "deploy: $*" >&2; exit 3; }
-usage() { sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 usctl() { systemctl --user "$@"; }
 main_pid() { usctl show -p MainPID --value "$unit"; }
 
@@ -53,6 +54,12 @@ flock -n 9 || die "another deploy holds the lock $dir/.deploy.lock"
 # A custom panel path means the panel is not under $dir/static.
 if grep -qE '^[[:space:]]*(export[[:space:]]+)?(MANAGEMENT_STATIC_PATH|WRITABLE_PATH)=' "$dir/.env" 2>/dev/null; then
   die "$dir/.env sets MANAGEMENT_STATIC_PATH or WRITABLE_PATH; the panel path is elsewhere"
+fi
+
+# The server's panel auto-updater (at startup, then every 3 h) would replace the deployed panel
+# with the GitHub release, so a deploy of a panel is only safe with it disabled.
+if ((!build_only)) && ! grep -qE '^[[:space:]]*disable-auto-update-panel:[[:space:]]*true([[:space:]]|#|$)' "$dir/config.yaml" 2>/dev/null; then
+  die "$dir/config.yaml does not set disable-auto-update-panel: true; the server's panel auto-updater would replace the deployed panel with the GitHub release"
 fi
 
 [[ "$ref" != origin/* ]] || git -C "$repo" fetch -q origin
@@ -101,10 +108,12 @@ healthy() {
 }
 
 # Swap the binary by rename (cp over a running binary fails) and restart the unit.
+# Callers run this as an if-condition, which disables set -e inside it: every step needs its own check.
 install_binary() {
   local old
-  old="$(main_pid)"
-  put "$1" "$dir/cli-proxy-api" +x
+  old="$(main_pid)" || return 1
+  put "$1" "$dir/cli-proxy-api" +x || return 1
+  cmp -s "$1" "$dir/cli-proxy-api" || return 1
   usctl reset-failed "$unit" 2>/dev/null || true
   usctl restart "$unit" || true
   healthy "$old"
@@ -119,7 +128,7 @@ rm -f "$dir/releases/rollback/management.html"
 echo "installing $sha to $unit"
 if ! install_binary "$release/cli-proxy-api"; then
   journalctl --user -u "$unit" -n 40 --no-pager || true
-  echo "deploy: $sha is unhealthy, rolling back the binary" >&2
+  echo "deploy: $sha did not install or is unhealthy, rolling back the binary" >&2
   if install_binary "$dir/releases/rollback/cli-proxy-api"; then
     echo "deploy: rolled back; $unit is healthy on the previous binary" >&2
     exit 1
