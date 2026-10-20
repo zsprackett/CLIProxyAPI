@@ -174,13 +174,16 @@ func TestClaudeQuotaObservationProfileFailureMarksOnlyPlanFailed(t *testing.T) {
 	}
 }
 
-func TestClaudeQuotaObservationUsageFailureKeepsPlan(t *testing.T) {
+// A failed usage request fails the poll even when the profile succeeded: the
+// windows are what the user clicked for. The plan still lands.
+func TestClaudeQuotaObservationUsageFailureFailsPollAndKeepsPlan(t *testing.T) {
+	usageErr := errors.New("fetch Claude OAuth usage failed with status 429")
 	obs, err := ClaudeQuotaObservation(ClaudeQuotaSources{
-		UsageErr: errors.New("fetch Claude OAuth usage failed with status 429"),
+		UsageErr: usageErr,
 		Profile:  claudeProfile("", "", false, true),
 	}, claudeTestNow)
-	if err != nil {
-		t.Fatalf("error = %v", err)
+	if err == nil || err.Error() != usageErr.Error() {
+		t.Fatalf("error = %v, want the usage error", err)
 	}
 	if obs.Sections[cliproxyauth.SectionClaudeUsage] != cliproxyauth.SectionFailed || len(obs.Windows) != 0 {
 		t.Fatalf("usage section = %+v windows = %+v", obs.Sections, obs.Windows)

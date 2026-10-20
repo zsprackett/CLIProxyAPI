@@ -196,10 +196,12 @@ func TestCodexQuotaObservationResetCreditsFailureKeepsOldCredits(t *testing.T) {
 	}
 }
 
+// The usage request owns the windows, so its failure fails the poll even when
+// the other sections succeeded; those sections still land.
 func TestCodexQuotaObservationSectionsStandAlone(t *testing.T) {
 	obs, err := CodexQuotaObservation(CodexQuotaSources{UsageErr: errors.New("usage 503"), ResetCredits: readCodexFixture(t, "codex_reset_credits.json")}, codexTestNow)
-	if err != nil {
-		t.Fatalf("one ok section is a successful poll, got %v", err)
+	if err == nil || err.Error() != "usage 503" {
+		t.Fatalf("error = %v, want the usage error", err)
 	}
 	if obs.Sections[cliproxyauth.SectionCodexUsage] != cliproxyauth.SectionFailed || len(obs.Windows) != 0 {
 		t.Fatalf("sections = %+v windows = %+v", obs.Sections, obs.Windows)

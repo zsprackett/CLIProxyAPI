@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	claudeauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/claude"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
@@ -143,6 +145,69 @@ func TestPollCredentialQuotaUpstreamFailureIsOKWithError(t *testing.T) {
 	}
 	if len(payload.Snapshot.Windows) != 1 {
 		t.Fatalf("windows = %+v, want the stale window kept", payload.Snapshot.Windows)
+	}
+}
+
+// A failed windows section is a failed poll for the user: the response is a
+// 200 whose last_poll.error names the windows request, even when the other
+// sections of the poll succeeded.
+func TestPollCredentialQuotaFailedWindowsSectionFailsThePoll(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Date(2026, 10, 19, 17, 0, 0, 0, time.UTC)
+	var profile claudeauth.OAuthProfile
+	profile.Account.HasClaudeMax = true
+	profile.Account.HasClaudePro = false
+	claudeObs, claudeErr := helps.ClaudeQuotaObservation(helps.ClaudeQuotaSources{
+		UsageErr: errors.New("fetch Claude OAuth usage failed with status 429"),
+		Profile:  &profile,
+	}, now)
+	codexObs, codexErr := helps.CodexQuotaObservation(helps.CodexQuotaSources{
+		UsageErr:     errors.New("fetch /backend-api/wham/usage failed with status 401"),
+		ResetCredits: []byte(`{"available_count": 1, "applicable_available_count": 1, "credits": []}`),
+	}, now)
+	cases := []struct {
+		provider  string
+		obs       coreauth.QuotaObservation
+		err       error
+		wantError string
+		wantPlan  string
+	}{
+		{"claude", claudeObs, claudeErr, "fetch Claude OAuth usage failed with status 429", "plan_max"},
+		{"codex", codexObs, codexErr, "fetch /backend-api/wham/usage failed with status 401", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			exec := &quotaPollStubExecutor{provider: tc.provider, obs: tc.obs, err: tc.err}
+			h, authIndex := newQuotaPollHandler(t, exec, nil)
+			rec := postQuotaPoll(h, `{"auth_index":"`+authIndex+`"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Snapshot coreauth.QuotaSnapshot `json:"quota_snapshot"`
+			}
+			if errDecode := json.Unmarshal(rec.Body.Bytes(), &payload); errDecode != nil {
+				t.Fatalf("decode: %v", errDecode)
+			}
+			if payload.Snapshot.LastPoll == nil || payload.Snapshot.LastPoll.Error != tc.wantError {
+				t.Fatalf("last poll = %+v, want error %q", payload.Snapshot.LastPoll, tc.wantError)
+			}
+			if len(payload.Snapshot.Windows) != 0 {
+				t.Fatalf("windows = %+v, want none from a failed usage request", payload.Snapshot.Windows)
+			}
+			switch extras := payload.Snapshot.Extras.(type) {
+			case coreauth.ClaudeExtras:
+				if extras.Plan.Status != coreauth.SectionOK || extras.Plan.Value == nil || *extras.Plan.Value != tc.wantPlan {
+					t.Fatalf("plan = %+v, want ok %q from the profile", extras.Plan, tc.wantPlan)
+				}
+			case coreauth.CodexExtras:
+				if extras.ResetCredits.Status != coreauth.SectionOK || extras.ResetCredits.Value == nil || *extras.ResetCredits.Value.Available != 1 {
+					t.Fatalf("reset credits = %+v, want ok with 1 available", extras.ResetCredits)
+				}
+			default:
+				t.Fatalf("extras = %T", payload.Snapshot.Extras)
+			}
+		})
 	}
 }
 
