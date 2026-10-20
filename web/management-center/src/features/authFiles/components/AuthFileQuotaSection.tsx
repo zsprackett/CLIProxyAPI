@@ -90,7 +90,15 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
           [cacheKey]: adapter.buildSuccessState(data),
         }));
         adapter.storeResult?.(file, data);
-        showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
+        const pollError = adapter.pollError?.(data);
+        if (pollError) {
+          showNotification(
+            t('auth_files.quota_refresh_failed', { name: file.name, message: pollError }),
+            'error'
+          );
+        } else {
+          showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
+        }
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('common.unknown_error');

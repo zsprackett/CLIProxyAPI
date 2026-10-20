@@ -52,6 +52,8 @@ export interface QuotaProviderData<TState, TData> {
   canResetQuota?: (snapshot: QuotaSnapshot) => boolean;
   /** Keeps a fetched result outside the card state; called with the success commit. */
   storeResult?: (file: AuthFileItem, data: TData) => void;
+  /** An upstream failure inside a successful answer; a click reports it instead of success. */
+  pollError?: (data: TData) => string | undefined;
   storeSelector: (state: QuotaStore) => Record<string, TState>;
   storeSetter: keyof QuotaStore;
   buildLoadingState: () => TState;

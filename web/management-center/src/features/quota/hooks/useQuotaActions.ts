@@ -50,7 +50,15 @@ export function useQuotaActions(disableControls: boolean) {
           }));
           adapter.storeResult?.(file, data);
           void enrichQuotaInBackground(adapter, file, data, successState, t);
-          showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
+          const pollError = adapter.pollError?.(data);
+          if (pollError) {
+            showNotification(
+              t('auth_files.quota_refresh_failed', { name: file.name, message: pollError }),
+              'error'
+            );
+          } else {
+            showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
+          }
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t('common.unknown_error');

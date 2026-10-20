@@ -46,6 +46,7 @@ const snapshotPollConfig = (
   filterFn,
   fetchQuota: pollQuota(`${type}_quota`),
   storeResult: storeSnapshot,
+  pollError: (snapshot) => snapshot.last_poll?.error,
   storeSelector: (state) => state.quotaPolls,
   storeSetter: 'setQuotaPolls',
   buildLoadingState: () => ({ status: 'loading' }),
