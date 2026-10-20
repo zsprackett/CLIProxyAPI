@@ -1,7 +1,6 @@
 package helps
 
 import (
-	"errors"
 	"strings"
 	"time"
 
@@ -24,8 +23,8 @@ type CodexQuotaSources struct {
 // CodexQuotaObservation builds the poll observation of a ChatGPT-login Codex
 // credential. The usage payload owns the windows, the plan, the access flags
 // and the credits; the subscription and reset-credit payloads own their
-// sections. Each section fails on its own. The error is non-nil only when no
-// section succeeded.
+// sections. Each section fails on its own. The error is the usage error when
+// that request failed: the windows are the poll, the rest rides along.
 func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.QuotaObservation, error) {
 	obs := cliproxyauth.QuotaObservation{
 		Provider:   cliproxyauth.ProviderCodex,
@@ -71,10 +70,7 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 		}
 	}
 	obs.Extras = extras
-	if src.UsageErr != nil && extras.Subscription.Status != cliproxyauth.SectionOK && extras.ResetCredits.Status != cliproxyauth.SectionOK {
-		return obs, errors.Join(src.UsageErr, src.SubscriptionErr, src.ResetCreditsErr)
-	}
-	return obs, nil
+	return obs, src.UsageErr
 }
 
 // codexUsageQuotaWindows reads the main, code-review, and additional rate

@@ -1,7 +1,6 @@
 package helps
 
 import (
-	"errors"
 	"strings"
 	"time"
 
@@ -42,8 +41,8 @@ type ClaudeQuotaSources struct {
 
 // ClaudeQuotaObservation builds the poll observation of a Claude OAuth
 // credential. The usage payload owns the windows and extra_usage; the profile
-// owns the plan. Each section fails on its own. The error is non-nil only when
-// no section succeeded.
+// owns the plan. Each section fails on its own. The error is the usage error
+// when that request failed: the windows are the poll, the plan only rides along.
 func ClaudeQuotaObservation(src ClaudeQuotaSources, now time.Time) (cliproxyauth.QuotaObservation, error) {
 	obs := cliproxyauth.QuotaObservation{
 		Provider:   cliproxyauth.ProviderClaude,
@@ -67,10 +66,7 @@ func ClaudeQuotaObservation(src ClaudeQuotaSources, now time.Time) (cliproxyauth
 		extras.Plan = cliproxyauth.OKSection(claudePlanType(src.Profile), now)
 	}
 	obs.Extras = extras
-	if src.UsageErr != nil && src.ProfileErr != nil {
-		return obs, errors.Join(src.UsageErr, src.ProfileErr)
-	}
-	return obs, nil
+	return obs, src.UsageErr
 }
 
 func claudeUsageQuotaWindows(root gjson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
