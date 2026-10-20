@@ -27,6 +27,7 @@ cleanup() {
   usctl reset-failed "$unit" >/dev/null 2>&1 || true
   git -C "$repo" worktree remove --force "$tmp/broken" >/dev/null 2>&1 || true
   git -C "$repo" worktree prune
+  chmod -R u+rwX "$dir" 2>/dev/null || true
   rm -rf "$dir" "$tmp"
 }
 trap cleanup EXIT
@@ -160,6 +161,33 @@ expect "deploy.sh exits non-zero" nonzero "$rc"
 expect "output names the lock" has lock "$out"
 expect "it returned within 5s (took ${elapsed}s)" at_most "$elapsed" 5
 finish 4 case4
+
+begin 5 "an unreadable release binary rolls back"
+chmod 000 "$dir/releases/$bad_sha/cli-proxy-api"
+run_deploy case5 "$bad_sha"
+chmod 644 "$dir/releases/$bad_sha/cli-proxy-api"
+expect "deploy.sh exits 1 (got $rc)" eq "$rc" 1
+expect "unit is healthy" wait_healthz 30
+expect "running exe is the install path" eq "$(exe_of_main)" "$dir/cli-proxy-api"
+expect "binary is the case 1 binary" same_file "$dir/cli-proxy-api" "$dir/releases/$head_sha/cli-proxy-api"
+expect "panel unchanged" same_file "$dir/static/management.html" "$dir/live-panel.html"
+expect "DEPLOYED unchanged" same_file "$dir/DEPLOYED" "$dir/live-deployed"
+finish 5 case5
+
+begin 6 "a config that leaves the panel auto-update on stops the deploy"
+pid6="$(main_pid)"
+cp -p "$dir/config.yaml" "$dir/config.yaml.good"
+sed -i 's/^\([[:space:]]*\)disable-auto-update-panel:.*/\1# disable-auto-update-panel: true/' "$dir/config.yaml"
+run_deploy case6 HEAD
+mv "$dir/config.yaml.good" "$dir/config.yaml"
+expect "deploy.sh exits 3 (got $rc)" eq "$rc" 3
+expect "output names the panel auto-update" has "disable-auto-update-panel" "$out"
+expect "MainPID unchanged" eq "$(main_pid)" "$pid6"
+expect "healthz answers" healthz
+expect "binary is the case 1 binary" same_file "$dir/cli-proxy-api" "$dir/releases/$head_sha/cli-proxy-api"
+expect "panel unchanged" same_file "$dir/static/management.html" "$dir/live-panel.html"
+expect "DEPLOYED unchanged" same_file "$dir/DEPLOYED" "$dir/live-deployed"
+finish 6 case6
 
 if ((fails)); then
   echo "FAILED: $fails case(s)"
