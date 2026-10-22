@@ -83,9 +83,11 @@ type Detail struct {
 	CachedTokens        int64
 	CacheReadTokens     int64
 	CacheCreationTokens int64
-	TotalTokens         int64
-	TokenBreakdown      TokenBreakdown
-	ResponseServiceTier string
+	// CacheCreation1hTokens is the 1-hour-TTL part of CacheCreationTokens.
+	CacheCreation1hTokens int64
+	TotalTokens           int64
+	TokenBreakdown        TokenBreakdown
+	ResponseServiceTier   string
 }
 
 type requestedModelAliasContextKey struct{}
