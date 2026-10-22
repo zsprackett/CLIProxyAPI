@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/quotaforecast"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 )
 
@@ -53,11 +53,11 @@ func (s *Service) HandleUsage(ctx context.Context, record coreusage.Record) {
 		atMs:      requestedAt.UnixMilli(),
 		traceID:   strings.TrimSpace(record.TraceID),
 		sessionID: record.SessionID,
-		keyHash:   quotaforecast.HashClientKey(record.APIKey),
+		keyHash:   usagehistory.HashClientKey(record.APIKey),
 		authID:    record.AuthID,
 		provider:  strings.ToLower(strings.TrimSpace(record.Provider)),
 		model:     model,
-		agent:     quotaforecast.AgentFamily(internallogging.GetClientRequestMetadata(ctx).UserAgent),
+		agent:     usagehistory.AgentFamily(internallogging.GetClientRequestMetadata(ctx).UserAgent),
 		latencyMs: clampU32(int64(record.Latency / time.Millisecond)),
 		ttftMs:    clampU32(int64(record.TTFT / time.Millisecond)),
 		uncached:  clampU32(tokens.uncached),

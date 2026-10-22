@@ -36,8 +36,8 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/quotaforecast"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -293,7 +293,7 @@ func (s *Service) Query(f Filter) Page {
 func maskedKeys(cfg *config.Config, present map[string]bool) map[string]string {
 	out := make(map[string]string, len(present))
 	for _, key := range cfg.APIKeys {
-		if hash := quotaforecast.HashClientKey(key); present[hash] {
+		if hash := usagehistory.HashClientKey(key); present[hash] {
 			out[hash] = util.HideAPIKey(strings.TrimSpace(key))
 		}
 	}

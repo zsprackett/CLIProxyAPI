@@ -2,12 +2,11 @@ package quotaforecast
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"time"
 
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 )
 
@@ -39,22 +38,11 @@ func (s *Service) HandleUsage(ctx context.Context, record coreusage.Record) {
 		Hour:     requestedAt.Truncate(time.Hour).Unix(),
 		AuthID:   record.AuthID,
 		Model:    model,
-		KeyHash:  HashClientKey(record.APIKey),
-		Agent:    AgentFamily(internallogging.GetClientRequestMetadata(ctx).UserAgent),
+		KeyHash:  usagehistory.HashClientKey(record.APIKey),
+		Agent:    usagehistory.AgentFamily(internallogging.GetClientRequestMetadata(ctx).UserAgent),
 		Requests: 1,
 		Tokens:   uncachedTokens(record.Detail),
 	})
-}
-
-// HashClientKey returns the identifier under which a client API key's usage is
-// stored: the first 12 hex characters of its SHA-256. Empty keys map to "-".
-func HashClientKey(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "-"
-	}
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])[:12]
 }
 
 // uncachedTokens approximates the tokens that count against a subscription quota.
@@ -75,21 +63,4 @@ func uncachedTokens(detail coreusage.Detail) int64 {
 		return 0
 	}
 	return total
-}
-
-// AgentFamily reduces a user agent to its first product token, e.g.
-// "claude-cli/2.1.3 (external, cli)" becomes "claude-cli".
-func AgentFamily(userAgent string) string {
-	userAgent = strings.TrimSpace(userAgent)
-	if userAgent == "" {
-		return "-"
-	}
-	if idx := strings.IndexAny(userAgent, "/ ("); idx > 0 {
-		userAgent = userAgent[:idx]
-	}
-	userAgent = strings.ToLower(userAgent)
-	if len(userAgent) > 40 {
-		userAgent = userAgent[:40]
-	}
-	return userAgent
 }

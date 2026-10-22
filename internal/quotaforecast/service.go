@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -289,7 +290,7 @@ func (s *Service) build(cfg *config.Config, auths []*coreauth.Auth, provider str
 	if detail {
 		maskedKeys = make(map[string]string, len(cfg.APIKeys))
 		for _, key := range cfg.APIKeys {
-			maskedKeys[HashClientKey(key)] = util.HideAPIKey(strings.TrimSpace(key))
+			maskedKeys[usagehistory.HashClientKey(key)] = util.HideAPIKey(strings.TrimSpace(key))
 		}
 	}
 	retentionSec := int64(retentionDays) * 86400

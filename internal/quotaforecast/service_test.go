@@ -112,16 +112,7 @@ func TestHandleUsageIgnoresDisabledAndUnsupported(t *testing.T) {
 	}
 }
 
-func TestUsageHelpers(t *testing.T) {
-	if got := AgentFamily("claude-cli/2.1.3 (external, cli)"); got != "claude-cli" {
-		t.Fatalf("agent = %q", got)
-	}
-	if got := AgentFamily(""); got != "-" {
-		t.Fatalf("empty agent = %q", got)
-	}
-	if HashClientKey("") != "-" || len(HashClientKey("k")) != 12 || HashClientKey("k") == HashClientKey("j") {
-		t.Fatal("client key hashing")
-	}
+func TestUncachedTokens(t *testing.T) {
 	if got := uncachedTokens(coreusage.Detail{TotalTokens: 100, CachedTokens: 30, CacheReadTokens: 40}); got != 60 {
 		t.Fatalf("uncached = %d, want 60", got)
 	}

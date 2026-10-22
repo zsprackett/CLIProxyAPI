@@ -48,7 +48,7 @@ type row struct {
 
 	// interned: these repeat across thousands of rows and share one backing string.
 	sessionID string
-	keyHash   string // quotaforecast.HashClientKey: 12 hex of sha256, "-" when no key
+	keyHash   string // usagehistory.HashClientKey: 12 hex of sha256, "-" when no key
 	authID    string
 	provider  string
 	model     string

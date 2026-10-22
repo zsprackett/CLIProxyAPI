@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/quotaforecast"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
@@ -127,11 +127,11 @@ func TestServiceRecordsAndQueries(t *testing.T) {
 	if !page.Enabled || page.Epoch == "" || page.Cursor != 6 || page.Oldest != 1 || page.More || len(page.Entries) != 6 {
 		t.Fatalf("page = %+v", page)
 	}
-	if page.Keys[quotaforecast.HashClientKey(testKey)] != util.HideAPIKey(testKey) {
+	if page.Keys[usagehistory.HashClientKey(testKey)] != util.HideAPIKey(testKey) {
 		t.Fatalf("keys = %+v", page.Keys)
 	}
 	first := page.Entries[5]
-	if first.Seq != 1 || first.TraceID != "trace-A" || !first.At.Equal(t0) || first.SessionID != "A" || first.KeyHash != quotaforecast.HashClientKey(testKey) ||
+	if first.Seq != 1 || first.TraceID != "trace-A" || !first.At.Equal(t0) || first.SessionID != "A" || first.KeyHash != usagehistory.HashClientKey(testKey) ||
 		first.AuthID != "a" || first.Provider != "claude" || first.Model != "opus" || first.Agent != "claude-cli" || !first.Stream ||
 		first.Status != 200 || first.Failed || first.LatencyMs != 2000 || first.TTFTMs != 500 {
 		t.Fatalf("first entry = %+v", first)
@@ -171,7 +171,7 @@ func TestServiceRecordsAndQueries(t *testing.T) {
 		want int
 	}{
 		{"session", Filter{Session: "A"}, 4},
-		{"key", Filter{KeyHash: quotaforecast.HashClientKey(testKey)}, 6},
+		{"key", Filter{KeyHash: usagehistory.HashClientKey(testKey)}, 6},
 		{"other key", Filter{KeyHash: "nope"}, 0},
 		{"auth", Filter{AuthID: "b"}, 1},
 		{"model", Filter{Model: "haiku"}, 1},
@@ -203,7 +203,7 @@ func TestServiceRecordsAndQueries(t *testing.T) {
 		t.Fatalf("sessions = %+v", sp)
 	}
 	a := sp.Sessions[1]
-	if a.KeyHash != quotaforecast.HashClientKey(testKey) || a.Agent != "claude-cli" || !a.FirstAt.Equal(t0) || !a.LastAt.Equal(t0.Add(90*time.Second)) ||
+	if a.KeyHash != usagehistory.HashClientKey(testKey) || a.Agent != "claude-cli" || !a.FirstAt.Equal(t0) || !a.LastAt.Equal(t0.Add(90*time.Second)) ||
 		a.Requests != 4 || a.Failed != 1 || len(a.Models) != 1 || a.Models[0] != "opus" || len(a.AuthIDs) != 1 || a.AuthIDs[0] != "a" {
 		t.Fatalf("session A = %+v", a)
 	}
