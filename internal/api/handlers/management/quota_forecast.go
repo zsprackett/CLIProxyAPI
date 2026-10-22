@@ -42,7 +42,7 @@ func (h *Handler) GetQuotaForecast(c *gin.Context) {
 	if runtimeCfg := manager.RuntimeConfig(); runtimeCfg != nil {
 		cfg = runtimeCfg
 	}
-	c.JSON(http.StatusOK, quotaForecastService().Forecast(cfg, manager.List(), quotaforecast.ForecastOptions{
+	c.JSON(http.StatusOK, quotaForecastService().Forecast(c.Request.Context(), cfg, manager.List(), quotaforecast.ForecastOptions{
 		Provider:      strings.TrimSpace(c.Query("provider")),
 		LookbackHours: lookback,
 		HistoryHours:  history,

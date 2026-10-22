@@ -138,6 +138,8 @@ type Attribution struct {
 	Models  []AttrRow `json:"models"`
 	Clients []AttrRow `json:"clients"`
 	Agents  []AttrRow `json:"agents"`
+	// Reason says why Method is "none" when usage history cannot be read.
+	Reason string `json:"reason,omitempty"`
 }
 
 // AttrRow is the estimated burn of one model, client key or agent. PercentPerMTok
