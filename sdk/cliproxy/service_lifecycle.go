@@ -299,8 +299,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		if s.coreManager != nil {
 			s.coreManager.StopAutoRefresh()
 		}
-		quotaforecast.Default().Stop(ctx)
-		requestlog.Default().Stop(ctx)
 		if s.watcher != nil {
 			if err := s.watcher.Stop(); err != nil {
 				log.Errorf("failed to stop file watcher: %v", err)
@@ -345,6 +343,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			}
 		}
 
+		// In-flight requests have published their usage. Drain the queue into every
+		// usage sink before the sinks write their last state and before plugin sinks
+		// are torn down.
+		usage.StopDefault()
+		quotaforecast.Default().Stop(ctx)
+		requestlog.Default().Stop(ctx)
+		// usagehistory.Default().Stop(ctx) goes here once the package's Service exists.
+
 		if s.pluginHost != nil {
 			sdktranslator.SetPluginHooks(nil)
 			sdkAuth.RegisterPluginAuthParser(nil)
@@ -362,8 +368,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 				s.accessManager.SetProviders(sdkaccess.RegisteredProviders())
 			}
 		}
-
-		usage.StopDefault()
 	})
 	return shutdownErr
 }
