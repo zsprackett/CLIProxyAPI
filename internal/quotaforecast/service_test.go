@@ -1,7 +1,6 @@
 package quotaforecast
 
 import (
-	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 )
 
 func claudeAuth(id string, utilization float64, observed, reset time.Time) *coreauth.Auth {
@@ -102,7 +100,7 @@ func TestForecastEndToEnd(t *testing.T) {
 	}
 	reloaded := testService(&now)
 	reloaded.refreshEnabled(cfg)
-	if series, _, _, _ := reloaded.hist.snapshot("claude"); len(series) != 2 {
+	if series, _, _ := reloaded.hist.snapshot("claude"); len(series) != 2 {
 		t.Fatalf("reloaded series = %d, want 2", len(series))
 	}
 
@@ -144,24 +142,5 @@ func TestForecastAttributionWithoutUsageHistory(t *testing.T) {
 				t.Fatalf("attribution = %+v, want method none, reason %s", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestHandleUsageIgnoresDisabledAndUnsupported(t *testing.T) {
-	now := testNow
-	s := testService(&now)
-	record := coreusage.Record{Provider: "claude", AuthID: "a", Model: "m", Detail: coreusage.Detail{TotalTokens: 10}}
-	s.HandleUsage(context.Background(), record)
-	s.enabled.Store(true)
-	record.Provider = "gemini"
-	s.HandleUsage(context.Background(), record)
-	if _, usage, _, _ := s.hist.snapshot(""); len(usage) != 0 {
-		t.Fatalf("usage recorded while disabled or unsupported: %+v", usage)
-	}
-}
-
-func TestUncachedTokens(t *testing.T) {
-	if got := uncachedTokens(coreusage.Detail{TotalTokens: 100, CachedTokens: 30, CacheReadTokens: 40}); got != 60 {
-		t.Fatalf("uncached = %d, want 60", got)
 	}
 }

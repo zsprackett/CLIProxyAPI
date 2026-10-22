@@ -97,7 +97,6 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(ctx, interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
-		usage.RegisterNamedPlugin("quota-forecast", quotaforecast.Default())
 		quotaforecast.Default().Start(ctx, s.coreManager)
 		usage.RegisterNamedPlugin("request-log", requestlog.Default())
 		requestlog.Default().Start(ctx, s.coreManager)

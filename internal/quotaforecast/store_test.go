@@ -1,6 +1,8 @@
 package quotaforecast
 
 import (
+	"compress/gzip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,7 +60,6 @@ func TestCompactThinsOldPointsButKeepsResetBoundaries(t *testing.T) {
 		{T: testNow.Add(-time.Hour).Unix(), Used: 20, Reset: 100 + 7*86400}, // recent: kept
 		{T: testNow.Add(-59 * time.Minute).Unix(), Used: 21, Reset: 100 + 7*86400},
 	}}
-	h.usage[usageKey{Hour: testNow.Add(-30 * 24 * time.Hour).Unix(), AuthID: "a"}] = &UsageBucket{Hour: testNow.Add(-30 * 24 * time.Hour).Unix(), AuthID: "a"}
 	h.compact(testNow, 14*24*time.Hour)
 	var used []float64
 	for _, p := range h.series[key].Points {
@@ -66,9 +67,6 @@ func TestCompactThinsOldPointsButKeepsResetBoundaries(t *testing.T) {
 	}
 	if want := []float64{11, 1, 3, 20, 21}; len(used) != len(want) || used[0] != 11 || used[1] != 1 || used[2] != 3 {
 		t.Fatalf("kept used values = %v, want %v", used, want)
-	}
-	if len(h.usage) != 0 {
-		t.Fatal("expired usage must be dropped")
 	}
 }
 
@@ -79,7 +77,6 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	h := newHistory()
 	h.observe("a", window("codex:weekly", 40, testNow, testNow.Add(time.Hour)))
-	h.addUsage(UsageBucket{Hour: testNow.Truncate(time.Hour).Unix(), AuthID: "a", Model: "m", KeyHash: "abc", Agent: "x", Requests: 1, Tokens: 100})
 	h.alerts["codex:weekly"] = &alertRecord{Class: "codex:weekly", State: alertFiring, RearmAt: 5}
 	if err := h.save(path, testNow); err != nil {
 		t.Fatal(err)
@@ -88,16 +85,47 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err := loaded.load(path); err != nil {
 		t.Fatal(err)
 	}
-	series, usage, alerts, since := loaded.snapshot("")
-	if len(series) != 1 || series[0].Points[0].Used != 40 || len(usage) != 1 || usage[0].Tokens != 100 || len(alerts) != 1 || since != testNow.Unix() {
-		t.Fatalf("round trip lost data: %+v %+v %+v %d", series, usage, alerts, since)
+	series, alerts, since := loaded.snapshot("")
+	if len(series) != 1 || series[0].Points[0].Used != 40 || len(alerts) != 1 || since != testNow.Unix() {
+		t.Fatalf("round trip lost data: %+v %+v %d", series, alerts, since)
 	}
 	empty := newHistory()
 	empty.compact(testNow, time.Hour)
-	if _, _, _, since := empty.snapshot(""); since != 0 {
+	if _, _, since := empty.snapshot(""); since != 0 {
 		t.Fatalf("empty history reports recording since %d", since)
 	}
 	if err := newHistory().load(filepath.Join(t.TempDir(), "missing.gz")); err != nil {
 		t.Fatalf("missing file must load as empty: %v", err)
+	}
+}
+
+// Files written before usage moved to usage history carry a "usage" key.
+func TestLoadIgnoresLegacyUsage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), historyFileName)
+	legacy := `{"version":1,"saved_at":1800000000,"since":1800000000,` +
+		`"series":[{"auth_id":"a","provider":"codex","class":"codex:weekly","window_sec":604800,"points":[{"t":1800000000,"u":40}]}],` +
+		`"usage":[{"hour":1799996400,"auth_id":"a","model":"m","key_hash":"abc","agent":"x","requests":1,"tokens":100}],` +
+		`"alerts":[{"class":"codex:weekly","provider":"codex","state":"firing"}]}`
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	if _, err = gz.Write([]byte(legacy)); err != nil {
+		t.Fatal(err)
+	}
+	if err = gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	h := newHistory()
+	if err = h.load(path); err != nil {
+		t.Fatalf("legacy file must load: %v", err)
+	}
+	series, alerts, since := h.snapshot("")
+	if len(series) != 1 || series[0].Points[0].Used != 40 || len(alerts) != 1 || alerts[0].State != alertFiring || since != 1_800_000_000 {
+		t.Fatalf("legacy file lost data: %+v %+v %d", series, alerts, since)
 	}
 }

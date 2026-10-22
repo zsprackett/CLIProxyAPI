@@ -19,30 +19,17 @@ type Series struct {
 	Points    []Point `json:"points"`
 }
 
-// usageKey identifies one hourly token usage bucket.
-type usageKey struct {
-	Hour    int64
-	AuthID  string
-	Model   string
-	KeyHash string
-	Agent   string
-}
-
-// UsageBucket aggregates the uncached tokens one client sent to one model through
-// one credential during one hour. KeyHash is a truncated SHA-256 of the client API
-// key; the raw key is never stored.
+// UsageBucket is the tokens, without cache reads, that one client sent to one
+// model through one credential during one hour. KeyHash is a truncated SHA-256
+// of the client API key.
 type UsageBucket struct {
-	Hour     int64  `json:"hour"`
-	AuthID   string `json:"auth_id"`
-	Model    string `json:"model"`
-	KeyHash  string `json:"key_hash"`
-	Agent    string `json:"agent"`
-	Requests int64  `json:"requests"`
-	Tokens   int64  `json:"tokens"`
-}
-
-func (b UsageBucket) key() usageKey {
-	return usageKey{Hour: b.Hour, AuthID: b.AuthID, Model: b.Model, KeyHash: b.KeyHash, Agent: b.Agent}
+	Hour     int64
+	AuthID   string
+	Model    string
+	KeyHash  string
+	Agent    string
+	Requests int64
+	Tokens   int64
 }
 
 // Alert states.
@@ -73,7 +60,6 @@ type fileV1 struct {
 	SavedAt int64          `json:"saved_at"`
 	Since   int64          `json:"since,omitempty"`
 	Series  []*Series      `json:"series"`
-	Usage   []UsageBucket  `json:"usage"`
 	Alerts  []*alertRecord `json:"alerts,omitempty"`
 }
 

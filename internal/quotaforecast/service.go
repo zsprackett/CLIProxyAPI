@@ -185,6 +185,9 @@ func (s *Service) sample(auths []*coreauth.Auth) {
 	}
 }
 
+// forecastProviders lists the providers whose quota windows are recorded.
+var forecastProviders = map[string]struct{}{"claude": {}, "codex": {}, "xai": {}, "devin": {}}
+
 func forecastAuth(auth *coreauth.Auth) bool {
 	if auth == nil || auth.Disabled || auth.Status == coreauth.StatusDisabled {
 		return false
@@ -241,7 +244,7 @@ func (s *Service) build(ctx context.Context, cfg *config.Config, auths []*coreau
 		Pools:            []Pool{},
 	}
 
-	series, _, alerts, since := s.hist.snapshot(provider)
+	series, alerts, since := s.hist.snapshot(provider)
 	resp.RecordingSince = unixPtr(since)
 	resp.Alerts = alertsForResponse(alerts)
 	if provider != "" {
