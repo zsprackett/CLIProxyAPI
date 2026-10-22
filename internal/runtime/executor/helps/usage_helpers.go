@@ -1175,7 +1175,15 @@ func ParseClaudeStreamUsage(line []byte) (usage.Detail, bool) {
 
 func parseClaudeUsageNode(usageNode gjson.Result) usage.Detail {
 	cacheReadTokens := usageNode.Get("cache_read_input_tokens").Int()
-	cacheCreationTokens := usageNode.Get("cache_creation_input_tokens").Int()
+	cacheCreationNode := usageNode.Get("cache_creation_input_tokens")
+	cacheCreationTokens := cacheCreationNode.Int()
+	// cache_creation splits the writes by TTL. Some gateways send only the object.
+	ephemeral5m := usageNode.Get("cache_creation.ephemeral_5m_input_tokens")
+	ephemeral1h := usageNode.Get("cache_creation.ephemeral_1h_input_tokens")
+	if !cacheCreationNode.Exists() && (ephemeral5m.Exists() || ephemeral1h.Exists()) {
+		cacheCreationTokens = ephemeral5m.Int() + ephemeral1h.Int()
+	}
+	cacheCreation1hTokens := max(ephemeral1h.Int(), 0)
 	rawOutputTokens := usageNode.Get("output_tokens").Int()
 	// Anthropic reports thinking as a subset of output_tokens. Prefer the official
 	// nested field, then fall back to legacy aliases used by some gateways.
@@ -1219,7 +1227,8 @@ func parseClaudeUsageNode(usageNode gjson.Result) usage.Detail {
 		nonReasoningOutput,
 		detail.ReasoningTokens,
 		detail.TotalTokens,
-	)
+	).WithCacheWrite1h(cacheCreation1hTokens)
+	detail.CacheCreation1hTokens = detail.TokenBreakdown.Input.CacheWrite1hTokens
 	return detail
 }
 
