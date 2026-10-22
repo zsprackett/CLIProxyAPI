@@ -1,0 +1,49 @@
+# --- config.example.yaml addition (v8 layout), under observability.usage, next to request-history ---
+observability:
+  usage:
+    # Long-term usage history: hourly rollups (no per-request rows) in
+    # <auth-dir>/.usage-history.db, served on the Management Center Usage page.
+    # Cost is an estimate at public API prices; subscription (OAuth) traffic is
+    # not billed this way. Prices are applied when you view the report, so a
+    # price change re-prices all history.
+    usage-history:
+      enabled: false
+      # Keep hourly rollups this many days (default 365, max 3650). Lowering it
+      # deletes older rows within a minute.
+      retention-days: 365
+      prices:
+        # Built-in LiteLLM snapshot, refreshed daily from LiteLLM unless disabled.
+        disable-remote: false
+        # remote-url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+        # Per-model overrides. USD per million tokens. Matched on the upstream
+        # model id (after alias resolution); provider narrows the match.
+        models:
+          # Price a renamed id like a known one.
+          - model: claude-opus-4-6-thinking
+            provider: antigravity
+            same-as: claude-opus-4-6
+          # Fix one rate, inherit the rest from the catalog.
+          # - model: claude-opus-5-5
+          #   cache-write-1h: 8
+          # A model LiteLLM does not know.
+          # - model: my-local-model
+          #   input: 0
+          #   output: 0
+
+# --- AGENTS.md, Code Conventions, timeouts sentence: add to the exception list ---
+#   ..., the quota-forecast alert webhook timeout in `internal/quotaforecast/alerts.go`,
+#   the LiteLLM price fetch timeout in `internal/usagehistory/prices/fetch.go`, and ...
+#
+# --- AGENTS.md, Architecture: add ---
+#   - `internal/usagehistory/` — Hourly usage rollups in SQLite (<auth-dir>/.usage-history.db),
+#     read-time cost from `prices/` (embedded LiteLLM snapshot + daily fetch + overrides)
+#
+# --- AGENTS.md, Commands: add ---
+#   scripts/update-model-prices.sh # Refresh internal/usagehistory/prices/litellm_trimmed.json from LiteLLM
+#
+# --- new: cmd/trim-prices/main.go ---
+#   reads the full LiteLLM JSON on stdin, prices.Trim(raw, builtin, now), writes Encode() to stdout.
+#   scripts/update-model-prices.sh = curl -fsSL $URL | go run ./cmd/trim-prices > internal/usagehistory/prices/litellm_trimmed.json
+#
+# --- go.mod ---
+#   modernc.org/sqlite (approved). Verify `CGO_ENABLED=0 GOOS=windows go build ./cmd/server` in CI.
