@@ -1132,6 +1132,34 @@ observability:
     #   retention-days: 7           # 1-30, default 7
     #   max-sessions: 1000          # 1-10000 sessions that keep a cache baseline, default 1000
 
+    # Long-term usage history: hourly rollups (no per-request rows) in
+    # <auth-dir>/.usage-history.db, served on the Management Center Usage page.
+    # Cost is an estimate at public API prices; subscription (OAuth) traffic is
+    # not billed this way. Prices are applied when you view the report, so a
+    # price change re-prices all history. Not available in home mode.
+    # usage-history:
+    #   enabled: false
+    #   retention-days: 365         # 1-3650, default 365. Lowering it deletes older rows within a minute.
+    #   prices:
+    #     # Built-in LiteLLM snapshot, refreshed daily from LiteLLM unless disabled.
+    #     disable-remote: false
+    #     # remote-url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+    #     # Per-model overrides in USD per million tokens. Matched on the upstream
+    #     # model id (after alias resolution); provider narrows the match.
+    #     # Rates: input, output, reasoning, cache-read, cache-write-5m, cache-write-1h.
+    #     models:
+    #       # Price a renamed id like a known one.
+    #       - model: claude-opus-4-6-thinking
+    #         provider: antigravity
+    #         same-as: claude-opus-4-6
+    #       # Fix one rate, inherit the rest from the catalog.
+    #       # - model: claude-opus-5-5
+    #       #   cache-write-1h: 8
+    #       # A model LiteLLM does not know.
+    #       # - model: my-local-model
+    #       #   input: 0
+    #       #   output: 0
+
   # Enable pprof HTTP debug server (host:port). Keep it bound to localhost for safety.
   pprof:
     enable: false

@@ -82,6 +82,21 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.RequestHistory.MaxSessions != newCfg.RequestHistory.MaxSessions {
 		changes = append(changes, fmt.Sprintf("request-history.max-sessions: %d -> %d", oldCfg.RequestHistory.MaxSessions, newCfg.RequestHistory.MaxSessions))
 	}
+	if oldCfg.UsageHistory.Enabled != newCfg.UsageHistory.Enabled {
+		changes = append(changes, fmt.Sprintf("usage-history.enabled: %t -> %t", oldCfg.UsageHistory.Enabled, newCfg.UsageHistory.Enabled))
+	}
+	if oldCfg.UsageHistory.RetentionDays != newCfg.UsageHistory.RetentionDays {
+		changes = append(changes, fmt.Sprintf("usage-history.retention-days: %d -> %d", oldCfg.UsageHistory.RetentionDays, newCfg.UsageHistory.RetentionDays))
+	}
+	if oldCfg.UsageHistory.Prices.DisableRemote != newCfg.UsageHistory.Prices.DisableRemote {
+		changes = append(changes, fmt.Sprintf("usage-history.prices.disable-remote: %t -> %t", oldCfg.UsageHistory.Prices.DisableRemote, newCfg.UsageHistory.Prices.DisableRemote))
+	}
+	if oldCfg.UsageHistory.Prices.RemoteURL != newCfg.UsageHistory.Prices.RemoteURL {
+		changes = append(changes, "usage-history.prices.remote-url: changed")
+	}
+	if !reflect.DeepEqual(oldCfg.UsageHistory.Prices.Models, newCfg.UsageHistory.Prices.Models) {
+		changes = append(changes, fmt.Sprintf("usage-history.prices.models: %d -> %d overrides", len(oldCfg.UsageHistory.Prices.Models), len(newCfg.UsageHistory.Prices.Models)))
+	}
 	if oldCfg.DisableClaudeCloakMode != newCfg.DisableClaudeCloakMode {
 		changes = append(changes, fmt.Sprintf("disable-claude-cloak-mode: %t -> %t", oldCfg.DisableClaudeCloakMode, newCfg.DisableClaudeCloakMode))
 	}

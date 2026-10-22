@@ -96,6 +96,9 @@ type Config struct {
 	// RequestHistory records every upstream attempt with a prompt-cache verdict.
 	RequestHistory RequestHistoryConfig `yaml:"request-history" json:"request-history"`
 
+	// UsageHistory keeps a year of hourly usage rollups with API-price cost estimates.
+	UsageHistory UsageHistoryConfig `yaml:"usage-history" json:"usage-history"`
+
 	// RequestRetry defines the number of additional credential retry rounds after
 	// the first round has exhausted its eligible credentials.
 	RequestRetry int `yaml:"request-retry" json:"request-retry"`

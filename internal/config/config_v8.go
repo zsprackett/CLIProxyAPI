@@ -70,7 +70,8 @@ func buildV8Paths() []configPath {
 		{"error-logs-max-files", "observability.logs.error-logs-max-files"},
 		{"usage-statistics-enabled", "observability.usage.usage-statistics-enabled"},
 		{"redis-usage-queue-retention-seconds", "observability.usage.redis-usage-queue-retention-seconds"},
-		{"request-history", "observability.usage.request-history"}, {"pprof", "observability.pprof"},
+		{"request-history", "observability.usage.request-history"},
+		{"usage-history", "observability.usage.usage-history"}, {"pprof", "observability.pprof"},
 	}
 	var out []configPath
 	var walk func(reflect.Type, string, []int)
