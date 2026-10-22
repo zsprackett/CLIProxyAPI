@@ -85,6 +85,19 @@
   --viz-success: #10b981;
   --viz-failure: #c65746;
 
+  // Usage chart categorical series, in this fixed order (adjacent pairs pass the CVD and
+  // normal-vision checks). Slots 2-5 sit below 3:1 on this surface; the group table and
+  // tooltip carry every value, so color is never the only channel. "Other" is a neutral gray.
+  --usage-series-1: #2a78d6;
+  --usage-series-2: #eb6834;
+  --usage-series-3: #1baf7a;
+  --usage-series-4: #eda100;
+  --usage-series-5: #e87ba4;
+  --usage-series-6: #008300;
+  --usage-series-7: #6250d6;
+  --usage-series-8: #e34948;
+  --usage-series-other: #8a867d;
+
   // 动效词汇表：内置 ease 太弱，交互反馈统一用强减速曲线。
   // 按压 160ms / 悬停 200ms，UI 动效不超过 300ms。
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
@@ -160,6 +173,17 @@
   --muted-bg: var(--bg-tertiary);
   --muted-foreground: var(--text-secondary);
   --accent-bg: var(--bg-tertiary);
+
+  // Usage chart series: the light steps, checked again on the white surface.
+  --usage-series-1: #2a78d6;
+  --usage-series-2: #eb6834;
+  --usage-series-3: #1baf7a;
+  --usage-series-4: #eda100;
+  --usage-series-5: #e87ba4;
+  --usage-series-6: #008300;
+  --usage-series-7: #6250d6;
+  --usage-series-8: #e34948;
+  --usage-series-other: #8a867d;
 }
 
 // 深色主题（#191919）
@@ -238,6 +262,17 @@
   // 因此深色单独降一档。三套主题均已通过对比度/色盲/亮度校验。
   --viz-success: #0fae78;
   --viz-failure: #cf4b3a;
+
+  // Usage chart series: the same hues stepped for the dark surface, all >= 3:1.
+  --usage-series-1: #3987e5;
+  --usage-series-2: #d95926;
+  --usage-series-3: #199e70;
+  --usage-series-4: #c98500;
+  --usage-series-5: #d55181;
+  --usage-series-6: #008300;
+  --usage-series-7: #9085e9;
+  --usage-series-8: #e66767;
+  --usage-series-other: #77736b;
 }
 
 @media (max-width: 768px),

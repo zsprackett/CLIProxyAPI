@@ -12,7 +12,6 @@ import {
   type UsageDimension,
   type UsageFilter,
   type UsageQuery,
-  type UsageReport,
   type UsageUnit,
 } from '@/services/api/usageHistory';
 
@@ -302,9 +301,9 @@ export function metricValue(cell: UsageCell, metric: UsageMetric): number {
   return totalTokens(cell);
 }
 
-/** Whether the report covers today (drives the 60s background refresh). */
-export function coversToday(report: UsageReport, today: string): boolean {
-  const { from, to } = report.query;
+/** Whether a range (a query, or a report's echoed query) covers today; drives the 60s refresh. */
+export function coversToday(range: { from: string; to: string }, today: string): boolean {
+  const { from, to } = range;
   return Boolean(from && to) && from <= today && today <= to;
 }
 

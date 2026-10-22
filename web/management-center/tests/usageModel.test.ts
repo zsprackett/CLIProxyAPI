@@ -203,9 +203,9 @@ describe('summary', () => {
   });
 
   test('coversToday compares civil dates', () => {
-    expect(coversToday(report, TODAY)).toBe(true);
-    expect(coversToday(report, '2026-10-23')).toBe(false);
-    expect(coversToday(normalizeUsageReport({}), TODAY)).toBe(false);
+    expect(coversToday(report.query, TODAY)).toBe(true);
+    expect(coversToday(report.query, '2026-10-23')).toBe(false);
+    expect(coversToday(normalizeUsageReport({}).query, TODAY)).toBe(false);
   });
 
   test('todayIn reads the civil date in the zone', () => {
