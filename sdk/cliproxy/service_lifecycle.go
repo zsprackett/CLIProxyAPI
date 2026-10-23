@@ -13,6 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v8/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -21,6 +22,10 @@ import (
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	log "github.com/sirupsen/logrus"
 )
+
+// stopUsageQueue drains the usage queue during Shutdown; tests replace it to
+// publish a record after the HTTP server stopped.
+var stopUsageQueue = usage.StopDefault
 
 // Run starts the service and blocks until the context is cancelled or the server stops.
 // It initializes all components including authentication, file watching, HTTP server,
@@ -100,6 +105,8 @@ func (s *Service) Run(ctx context.Context) error {
 		quotaforecast.Default().Start(ctx, s.coreManager)
 		usage.RegisterNamedPlugin("request-log", requestlog.Default())
 		requestlog.Default().Start(ctx, s.coreManager)
+		usage.RegisterNamedPlugin("usage-history", usagehistory.Default())
+		usagehistory.Default().Start(ctx, s.coreManager)
 	}
 
 	if !homeEnabled {
@@ -345,10 +352,10 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		// In-flight requests have published their usage. Drain the queue into every
 		// usage sink before the sinks write their last state and before plugin sinks
 		// are torn down.
-		usage.StopDefault()
+		stopUsageQueue()
 		quotaforecast.Default().Stop(ctx)
 		requestlog.Default().Stop(ctx)
-		// usagehistory.Default().Stop(ctx) goes here once the package's Service exists.
+		usagehistory.Default().Stop(ctx)
 
 		if s.pluginHost != nil {
 			sdktranslator.SetPluginHooks(nil)
