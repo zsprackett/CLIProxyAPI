@@ -16,6 +16,7 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 ./build-panel.sh # Build web/management-center into static/management.html (needs bun 1.3.14)
 scripts/deploy.sh [ref] # Build binary + panel from one commit, install both, restart, health-check, auto-rollback (default origin/main)
 scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit on a port in 18390-18399 (never the live proxy)
+scripts/update-model-prices.sh # Refresh the embedded LiteLLM price snapshot (internal/usagehistory/prices/litellm_trimmed.json) through cmd/trim-prices
 # A local panel build needs `disable-auto-update-panel: true`, or the panel auto-updater replaces it with a GitHub release
 ```
 - Common flags: `--config <path>`, `--tui`, `--standalone`, `--local-model`, `--no-browser`, `--oauth-callback-port <port>`
@@ -40,6 +41,7 @@ scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit
 - `internal/watcher/` — Config hot-reload and watchers
 - `internal/wsrelay/` — WebSocket relay sessions
 - `internal/usage/` — Usage and token accounting
+- `internal/usagehistory/` — Hourly usage rollups in `<auth-dir>/.usage-history.db` (SQLite, one run-loop writer), cost at read time from `prices/` (LiteLLM snapshot + daily fetch + config overrides), and the `/observability/usage/history|prices` reports
 - `internal/home/` — CLIProxyAPIHome control plane integration (bootstrap, RESP communication, dispatch coordination)
 - `internal/tui/` — Bubbletea terminal UI (`--tui`, `--standalone`)
 - `sdk/cliproxy/` — Embeddable SDK entry (service/builder/watchers/pipeline)
