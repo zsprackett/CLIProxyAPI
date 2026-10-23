@@ -39,6 +39,8 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/observability/logs/requests/:id", s.mgmt.GetRequestLogByID)
 	v8.GET("/observability/usage/api-keys", s.mgmt.GetAPIKeyUsage)
 	v8.GET("/observability/usage/queue", s.mgmt.GetUsageQueue)
+	v8.GET("/observability/usage/history", s.mgmt.GetUsageHistory)
+	v8.GET("/observability/usage/prices", s.mgmt.GetUsagePrices)
 	v8.GET("/observability/quota/forecast", s.mgmt.GetQuotaForecast)
 	v8.GET("/observability/requests", s.mgmt.GetRequestHistory)
 	v8.GET("/observability/requests/sessions", s.mgmt.GetRequestSessions)
