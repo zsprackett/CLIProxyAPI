@@ -1714,6 +1714,7 @@
     "forecast_attr_unknown_agent": "Неизвестный агент",
     "forecast_attr_no_key": "Без API-ключа",
     "forecast_attr_empty": "Для этого окна расход токенов ещё не записан.",
+    "forecast_attr_history_off": "Для распределения нужна история использования. Включите usage-history в config.yaml, чтобы разделить расход по моделям, ключам клиентов и агентам.",
     "forecast_attr_method_nnls": "Подобранная стоимость токена (NNLS)",
     "forecast_attr_method_proportional": "Распределено по доле токенов",
     "forecast_attr_method_none": "Недостаточно данных для распределения",

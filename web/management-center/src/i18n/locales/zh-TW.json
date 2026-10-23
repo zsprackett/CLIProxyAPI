@@ -1735,6 +1735,7 @@
     "forecast_attr_unknown_agent": "未知代理",
     "forecast_attr_no_key": "無 API 金鑰",
     "forecast_attr_empty": "該視窗尚未記錄 token 用量。",
+    "forecast_attr_history_off": "歸因需要用量歷史。請在 config.yaml 中啟用 usage-history，以按模型、用戶端金鑰和代理拆分消耗。",
     "forecast_attr_method_nnls": "擬合每 token 成本（NNLS）",
     "forecast_attr_method_proportional": "依 token 佔比分攤",
     "forecast_attr_method_none": "資料不足，無法歸因",

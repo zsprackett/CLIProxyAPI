@@ -1712,6 +1712,7 @@
     "forecast_attr_unknown_agent": "Unknown agent",
     "forecast_attr_no_key": "No API key",
     "forecast_attr_empty": "No token usage recorded for this window yet.",
+    "forecast_attr_history_off": "Attribution needs usage history. Turn on usage-history in config.yaml to split burn by model, client key and agent.",
     "forecast_attr_method_nnls": "Fitted per-token cost (NNLS)",
     "forecast_attr_method_proportional": "Split by token share",
     "forecast_attr_method_none": "Not enough data to attribute",

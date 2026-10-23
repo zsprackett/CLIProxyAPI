@@ -138,3 +138,35 @@ describe('AttributionTable client rows', () => {
     expect(markup).not.toContain('4e9f7b2de42c');
   });
 });
+
+describe('AttributionTable without usage history', () => {
+  test('says usage history is off instead of "no usage yet"', () => {
+    const attribution = {
+      ...forecast.pools[0].attribution!,
+      method: 'none' as const,
+      reason: 'usage_history_disabled',
+      models: [],
+      clients: [],
+      agents: [],
+    };
+    const markup = renderToStaticMarkup(
+      createElement(AttributionTable, { attribution, clientLabels: new Map() })
+    );
+    expect(markup).toContain('Attribution needs usage history');
+    expect(markup).not.toContain('No token usage recorded');
+  });
+
+  test('keeps the plain empty message when attribution ran', () => {
+    const attribution = {
+      ...forecast.pools[0].attribution!,
+      reason: null,
+      models: [],
+      clients: [],
+      agents: [],
+    };
+    const markup = renderToStaticMarkup(
+      createElement(AttributionTable, { attribution, clientLabels: new Map() })
+    );
+    expect(markup).toContain('No token usage recorded');
+  });
+});

@@ -59,7 +59,11 @@ export function AttributionTable({
       </div>
 
       {rows.length === 0 ? (
-        <p className={styles.empty}>{t('quota_management.forecast_attr_empty')}</p>
+        <p className={styles.empty}>
+          {attribution.reason?.startsWith('usage_history_')
+            ? t('quota_management.forecast_attr_history_off')
+            : t('quota_management.forecast_attr_empty')}
+        </p>
       ) : (
         <div className={styles.scroller}>
           <table className={styles.table}>
