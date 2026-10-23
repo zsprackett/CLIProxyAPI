@@ -48,11 +48,21 @@ const claudeFile = (quotaSnapshot?: QuotaSnapshot): AuthFileItem => ({
   ...(quotaSnapshot ? { quota_snapshot: quotaSnapshot } : {}),
 });
 
-/** A listing snapshot with the 7-day window at 90% used, so 10% shows. */
+/**
+ * A listing snapshot with the 7-day window at 90% used, so 10% shows. The reset
+ * is a day after the reading: the golden's fixed reset_at passes with the wall clock.
+ */
 const listedReading = (updatedAt: string): QuotaSnapshot => ({
   ...claudeGolden,
   windows: claudeGolden.windows.map((window) =>
-    window.id === 'seven_day' ? { ...window, used_percent: 90, observed_at: updatedAt } : window
+    window.id === 'seven_day'
+      ? {
+          ...window,
+          used_percent: 90,
+          observed_at: updatedAt,
+          reset_at: iso(Date.parse(updatedAt) + 24 * 60 * MINUTE),
+        }
+      : window
   ),
   updated_at: updatedAt,
 });

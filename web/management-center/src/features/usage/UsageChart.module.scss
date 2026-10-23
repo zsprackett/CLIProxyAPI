@@ -1,0 +1,153 @@
+@use '../../styles/mixins' as *;
+
+.chart {
+  --chart-height: 280px;
+
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  min-width: 0;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px $spacing-md;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.plot {
+  display: flex;
+  gap: $spacing-sm;
+  padding-top: 8px;
+}
+
+.yAxis {
+  position: relative;
+  width: 56px;
+  height: var(--chart-height);
+  flex: none;
+}
+
+.yTick {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: var(--chart-height);
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+
+  line {
+    vector-effect: non-scaling-stroke;
+  }
+}
+
+.gridline {
+  stroke: var(--border-color);
+  stroke-width: 1;
+}
+
+// A thin surface-colored edge keeps stacked segments apart without a legend lookup.
+.bar {
+  stroke: var(--bg-primary);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.hoverColumn {
+  fill: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.tooltip {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: $spacing-sm $spacing-md;
+  min-width: 180px;
+  max-width: 320px;
+  border-radius: $radius-md;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.tooltipTime {
+  font-weight: 650;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltipRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+
+  b {
+    margin-left: auto;
+    padding-left: $spacing-sm;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.tooltipTotal {
+  padding-top: 3px;
+  border-top: 1px solid var(--border-color);
+}
+
+.xAxis {
+  position: relative;
+  height: 16px;
+  margin-left: calc(56px + #{$spacing-sm});
+}
+
+.xTick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

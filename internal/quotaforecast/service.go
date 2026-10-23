@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagehistory"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -97,7 +98,7 @@ func (s *Service) run(ctx context.Context, manager *coreauth.Manager, done chan 
 	defer ticker.Stop()
 	tick := 0
 	for {
-		s.tick(manager, tick)
+		s.tick(ctx, manager, tick)
 		tick++
 		select {
 		case <-ctx.Done():
@@ -110,7 +111,7 @@ func (s *Service) run(ctx context.Context, manager *coreauth.Manager, done chan 
 
 // tick samples the manager's credentials, evaluates alerts and periodically
 // compacts and saves the history.
-func (s *Service) tick(manager *coreauth.Manager, tick int) {
+func (s *Service) tick(ctx context.Context, manager *coreauth.Manager, tick int) {
 	cfg := manager.RuntimeConfig()
 	if !s.refreshEnabled(cfg) {
 		return
@@ -121,7 +122,7 @@ func (s *Service) tick(manager *coreauth.Manager, tick int) {
 	if tick%compactEvery == 0 {
 		s.hist.compact(now, retention(cfg))
 	}
-	resp := s.build(cfg, auths, "", defaultLookbackHours, 0, false)
+	resp := s.build(ctx, cfg, auths, "", defaultLookbackHours, 0, false)
 	lead := time.Duration(cfg.QuotaForecast.AlertLeadHours) * time.Hour
 	for _, rec := range s.hist.evaluateAlerts(resp.Pools, now, lead) {
 		s.notify(cfg, rec, now)
@@ -184,6 +185,9 @@ func (s *Service) sample(auths []*coreauth.Auth) {
 	}
 }
 
+// forecastProviders lists the providers whose quota windows are recorded.
+var forecastProviders = map[string]struct{}{"claude": {}, "codex": {}, "xai": {}, "devin": {}}
+
 func forecastAuth(auth *coreauth.Auth) bool {
 	if auth == nil || auth.Disabled || auth.Status == coreauth.StatusDisabled {
 		return false
@@ -202,7 +206,8 @@ type ForecastOptions struct {
 }
 
 // Forecast samples auths and returns the forecast of every pooled quota window.
-func (s *Service) Forecast(cfg *config.Config, auths []*coreauth.Auth, opts ForecastOptions) Response {
+// A provider-scoped forecast reads usage history through ctx for attribution.
+func (s *Service) Forecast(ctx context.Context, cfg *config.Config, auths []*coreauth.Auth, opts ForecastOptions) Response {
 	now := s.now().UTC()
 	if cfg == nil || !cfg.QuotaForecast.Enabled {
 		return Response{Enabled: false, Reason: "disabled", GeneratedAt: now, Pools: []Pool{}, Alerts: []Alert{}}
@@ -215,10 +220,12 @@ func (s *Service) Forecast(cfg *config.Config, auths []*coreauth.Auth, opts Fore
 	}
 	s.sample(auths)
 	provider := strings.ToLower(strings.TrimSpace(opts.Provider))
-	return s.build(cfg, auths, provider, opts.LookbackHours, opts.HistoryHours, provider != "")
+	return s.build(ctx, cfg, auths, provider, opts.LookbackHours, opts.HistoryHours, provider != "")
 }
 
-func (s *Service) build(cfg *config.Config, auths []*coreauth.Auth, provider string, lookbackHours, historyHours int, detail bool) Response {
+// build reads usage history only when detail is set, so the alert tick never
+// waits on it.
+func (s *Service) build(ctx context.Context, cfg *config.Config, auths []*coreauth.Auth, provider string, lookbackHours, historyHours int, detail bool) Response {
 	now := s.now().UTC()
 	lookbackHours = clampInt(lookbackHours, defaultLookbackHours, 6, 24)
 	retentionDays := clampInt(cfg.QuotaForecast.RetentionDays, defaultRetentionDays, 1, maxRetentionDays)
@@ -237,7 +244,7 @@ func (s *Service) build(cfg *config.Config, auths []*coreauth.Auth, provider str
 		Pools:            []Pool{},
 	}
 
-	series, usage, alerts, since := s.hist.snapshot(provider)
+	series, alerts, since := s.hist.snapshot(provider)
 	resp.RecordingSince = unixPtr(since)
 	resp.Alerts = alertsForResponse(alerts)
 	if provider != "" {
@@ -285,14 +292,17 @@ func (s *Service) build(cfg *config.Config, auths []*coreauth.Auth, provider str
 	}
 	sort.Strings(classes)
 
+	retentionSec := int64(retentionDays) * 86400
 	var maskedKeys map[string]string
+	var usage []UsageBucket
+	var usageReason string
 	if detail {
 		maskedKeys = make(map[string]string, len(cfg.APIKeys))
 		for _, key := range cfg.APIKeys {
-			maskedKeys[HashClientKey(key)] = util.HideAPIKey(strings.TrimSpace(key))
+			maskedKeys[usagehistory.HashClientKey(key)] = util.HideAPIKey(strings.TrimSpace(key))
 		}
+		usage, usageReason = loadUsage(ctx, time.Unix(nowUnix-retentionSec, 0).UTC())
 	}
-	retentionSec := int64(retentionDays) * 86400
 	for _, class := range classes {
 		members := byClass[class]
 		windowSec := int64(0)
@@ -311,6 +321,7 @@ func (s *Service) build(cfg *config.Config, auths []*coreauth.Auth, provider str
 			drain:        resp.DrainModel,
 			detail:       detail,
 			usage:        usage,
+			usageReason:  usageReason,
 			maskedKeys:   maskedKeys,
 			accountNames: names,
 		}

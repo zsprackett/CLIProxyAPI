@@ -29,6 +29,10 @@ type TokenInputBreakdown struct {
 	UncachedTokens   int64 `json:"uncached_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens"`
 	CacheWriteTokens int64 `json:"cache_write_tokens"`
+	// CacheWrite1hTokens is the part of CacheWriteTokens written with a 1-hour
+	// TTL (Anthropic cache_creation.ephemeral_1h_input_tokens). The rest of
+	// CacheWriteTokens is default-TTL (5-minute) writes. 0 for other providers.
+	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitempty"`
 }
 
 // TokenOutputBreakdown contains mutually exclusive output token buckets.
@@ -75,7 +79,21 @@ func (b TokenBreakdown) Valid() bool {
 	if b.Quality == TokenAccountingQualityComplete && b.UnclassifiedTokens != 0 {
 		return false
 	}
+	if b.Input.CacheWrite1hTokens < 0 || b.Input.CacheWrite1hTokens > b.Input.CacheWriteTokens {
+		return false
+	}
 	return true
+}
+
+// WithCacheWrite1h returns b with the 1-hour-TTL subset of its cache writes set.
+// An out-of-range n leaves the subset 0, so the writes still count at the
+// default TTL and the breakdown stays valid.
+func (b TokenBreakdown) WithCacheWrite1h(n int64) TokenBreakdown {
+	if n < 0 || n > b.Input.CacheWriteTokens {
+		n = 0
+	}
+	b.Input.CacheWrite1hTokens = n
+	return b
 }
 
 func validTokenAccountingQuality(quality TokenAccountingQuality) bool {
@@ -258,7 +276,7 @@ func EnsureTokenBreakdownForProvider(detail Detail, provider, executorType strin
 			(semantics == tokenAccountingSemanticsSubset || semantics == tokenAccountingSemanticsSeparateReasoning) {
 			detail.CacheReadTokens = detail.CachedTokens
 		}
-		detail.TokenBreakdown = tokenBreakdownForSemantics(detail, semantics)
+		detail.TokenBreakdown = tokenBreakdownForSemantics(detail, semantics).WithCacheWrite1h(detail.CacheCreation1hTokens)
 	}
 	if detail.TotalTokens == 0 {
 		detail.TotalTokens = detail.TokenBreakdown.TotalTokens

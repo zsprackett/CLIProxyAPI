@@ -295,6 +295,7 @@ type poolOptions struct {
 	drain        string
 	detail       bool
 	usage        []UsageBucket
+	usageReason  string
 	maskedKeys   map[string]string
 	accountNames map[string]string
 }
@@ -472,7 +473,11 @@ func computePool(class, provider string, members []member, accountsTotal int, op
 	}
 	pool.Chart = chart
 	pool.HourlyBurn = hourlyBurn(members, now)
-	pool.Attribution = attribute(members, opts.usage, opts.maskedKeys, now)
+	if opts.usageReason != "" {
+		pool.Attribution = &Attribution{Method: "none", Reason: opts.usageReason}
+	} else {
+		pool.Attribution = attribute(members, opts.usage, opts.maskedKeys, now)
+	}
 	return pool
 }
 

@@ -382,6 +382,53 @@ type RequestHistoryConfig struct {
 	MaxSessions int `yaml:"max-sessions,omitempty" json:"max-sessions,omitempty"`
 }
 
+// UsageHistoryConfig controls the long-term hourly usage rollups and the price
+// catalog behind GET /v8/management/observability/usage/history.
+type UsageHistoryConfig struct {
+	// Enabled turns on recording into <auth-dir>/.usage-history.db. Default false.
+	// Turning it off stops recording and closes the file; history is kept on disk.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// RetentionDays keeps hourly rollups this long. Default 365, min 1, max 3650.
+	// Raising it keeps more from now on; lowering it deletes older rows at the next
+	// cleanup (within a minute of the reload, then daily).
+	RetentionDays int `yaml:"retention-days,omitempty" json:"retention-days,omitempty"`
+
+	// Prices configures the price catalog used to estimate cost at read time.
+	Prices UsagePricesConfig `yaml:"prices,omitempty" json:"prices,omitempty"`
+}
+
+// UsagePricesConfig configures the price catalog.
+type UsagePricesConfig struct {
+	// DisableRemote stops the daily LiteLLM fetch; the built-in snapshot (and the
+	// last cached fetch, if any) stays in use.
+	DisableRemote bool `yaml:"disable-remote,omitempty" json:"disable-remote,omitempty"`
+
+	// RemoteURL replaces the LiteLLM model_prices_and_context_window.json URL
+	// (e.g. a mirror). Empty = the GitHub raw URL.
+	RemoteURL string `yaml:"remote-url,omitempty" json:"remote-url,omitempty"`
+
+	// Models overrides or adds prices per model. First match by provider+model,
+	// then model alone. Rates are USD per million tokens.
+	Models []ModelPriceOverride `yaml:"models,omitempty" json:"models,omitempty"`
+}
+
+// ModelPriceOverride prices one upstream model id (Record.Model).
+type ModelPriceOverride struct {
+	Model    string `yaml:"model" json:"model"`
+	Provider string `yaml:"provider,omitempty" json:"provider,omitempty"`
+	// SameAs prices Model like this LiteLLM key, e.g. an antigravity id like
+	// "claude-opus-4-6-thinking" same-as "claude-opus-4-6". Explicit rates below
+	// still win.
+	SameAs       string   `yaml:"same-as,omitempty" json:"same-as,omitempty"`
+	Input        *float64 `yaml:"input,omitempty" json:"input,omitempty"`
+	Output       *float64 `yaml:"output,omitempty" json:"output,omitempty"`
+	Reasoning    *float64 `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
+	CacheRead    *float64 `yaml:"cache-read,omitempty" json:"cache-read,omitempty"`
+	CacheWrite5m *float64 `yaml:"cache-write-5m,omitempty" json:"cache-write-5m,omitempty"`
+	CacheWrite1h *float64 `yaml:"cache-write-1h,omitempty" json:"cache-write-1h,omitempty"`
+}
+
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first", "soonest-reset".

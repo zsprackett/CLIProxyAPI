@@ -1,0 +1,35 @@
+Tests the shape implies (what each proves, user-visible where possible)
+
+Go
+- usagehistory/plan_test.go: America/Toronto day buckets over 2026-03-08 (23h) and 2026-11-01 (25h);
+  hour buckets on 2026-11-01 = 25 with two "01:00" starts of different offsets; Asia/Kolkata day
+  boundary assigns the 18:00 UTC hour to the right local day by the start rule; America/Santiago
+  midnight DST; month buckets across a DST change.
+- usagehistory/rollup_test.go: Claude record with 1h writes -> CacheWrite5m/1h split; invalid breakdown
+  -> Ensure path; unclassified-only (devin); Generate=false skipped; prompt > 200k -> LongCtx.
+- usagehistory/service_test.go (temp auth dir, controllable now, fake manager config):
+  decide() table cases one per row; enable -> record -> Report shows it immediately (sync flush);
+  disable -> file closed, Report {enabled:false, reason:disabled}; auth-dir change writes the old
+  file then the new; DB path is a directory -> Broken, records kept, fixing it -> they appear;
+  retention lowered -> rows older than cutoff gone after one tick; Stop flushes.
+- usagehistory/store_test.go: migrate 0->1; user_version 2 with write_compat 1 opens and writes;
+  write_compat 2 -> errTooNew; corrupt file -> renamed and recreated; upsert twice sums.
+- usagehistory/report_test.go: cost with fixture table: priced, unpriced (null), mixed (number +
+  unpriced_tokens), long-context tier, group=key with two models priced separately.
+- usagehistory/prices: Trim on a fixture LiteLLM excerpt incl. the four live models; fallbacks set
+  Derived; Lookup rules 1-4 in order; override same-as + partial rate; Fetch with httptest: 200,
+  304 (If-None-Match sent), 500, oversize, truncated (< minEntries rejected); Schedule.Due.
+- usage/manager_test.go: Stop waits until a slow plugin has seen every queued record.
+- helps/usage_helpers_test.go: ephemeral_1h parse + stream merge (see delta file).
+- quotaforecast: attribution from a fake usageReader; disabled reader -> Method none, Reason set.
+- service_lifecycle: a record published during server.Stop reaches usagehistory's DB.
+- management/usage_history_test.go: 400 cases from ParseQuery; 200 passthrough via the injectable var.
+
+Panel (bun:test)
+- tests/usageHistoryApi.test.ts: normalizeUsageReport on full/partial/garbage fixtures; serializeUsageQuery.
+- tests/usageModel.test.ts: presets -> from/to; allowedUnits/suggestBucket; bucketLabel incl. repeated hour;
+  summarize partial cost.
+- tests/usageChartModel.test.ts: top-8 + other folding; tokenType stacking; rect geometry sums to totals.
+- tests/usageCsv.test.ts: header, null cost empty, quoting, formula guard, no raw key, BOM.
+- tests/usageView.test.tsx: renderToStaticMarkup for disabled reasons, populated report, unpriced footnote.
+- tests/usageLocales.test.ts: en/zh-CN/zh-TW/ru parity for usage.* and nav keys.

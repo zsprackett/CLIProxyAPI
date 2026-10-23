@@ -16,6 +16,7 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 ./build-panel.sh # Build web/management-center into static/management.html (needs bun 1.3.14)
 scripts/deploy.sh [ref] # Build binary + panel from one commit, install both, restart, health-check, auto-rollback (default origin/main)
 scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit on a port in 18390-18399 (never the live proxy)
+scripts/update-model-prices.sh # Refresh the embedded LiteLLM price snapshot (internal/usagehistory/prices/litellm_trimmed.json) through cmd/trim-prices
 # A local panel build needs `disable-auto-update-panel: true`, or the panel auto-updater replaces it with a GitHub release
 ```
 - Common flags: `--config <path>`, `--tui`, `--standalone`, `--local-model`, `--no-browser`, `--oauth-callback-port <port>`
@@ -40,6 +41,7 @@ scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit
 - `internal/watcher/` — Config hot-reload and watchers
 - `internal/wsrelay/` — WebSocket relay sessions
 - `internal/usage/` — Usage and token accounting
+- `internal/usagehistory/` — Hourly usage rollups in `<auth-dir>/.usage-history.db` (SQLite, one run-loop writer), cost at read time from `prices/` (LiteLLM snapshot + daily fetch + config overrides), and the `/observability/usage/history|prices` reports
 - `internal/home/` — CLIProxyAPIHome control plane integration (bootstrap, RESP communication, dispatch coordination)
 - `internal/tui/` — Bubbletea terminal UI (`--tui`, `--standalone`)
 - `sdk/cliproxy/` — Embeddable SDK entry (service/builder/watchers/pipeline)
@@ -61,7 +63,7 @@ scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit
 - Wrap defer errors: `defer func() { if err := f.Close(); err != nil { log.Errorf(...) } }()`
 - Use logrus structured logging; avoid leaking secrets/tokens in logs
 - Avoid panics in HTTP handlers; prefer logged errors and meaningful HTTP status codes
-- Timeouts are allowed only during credential acquisition; after an upstream connection is established, do not set timeouts for any subsequent network behavior. Intentional exceptions that must remain allowed are the Codex websocket liveness deadlines in `internal/runtime/executor/codex_websockets_executor.go`, the wsrelay session deadlines in `internal/wsrelay/session.go`, the management APICall timeout in `internal/api/handlers/management/api_tools.go`, the quota-forecast alert webhook timeout in `internal/quotaforecast/alerts.go`, and the `cmd/fetch_antigravity_models` utility timeouts
+- Timeouts are allowed only during credential acquisition; after an upstream connection is established, do not set timeouts for any subsequent network behavior. Intentional exceptions that must remain allowed are the Codex websocket liveness deadlines in `internal/runtime/executor/codex_websockets_executor.go`, the wsrelay session deadlines in `internal/wsrelay/session.go`, the management APICall timeout in `internal/api/handlers/management/api_tools.go`, the quota-forecast alert webhook timeout in `internal/quotaforecast/alerts.go`, the LiteLLM price fetch timeout in `internal/usagehistory/prices/fetch.go`, and the `cmd/fetch_antigravity_models` utility timeouts
 - Avoid wall-clock `time.Sleep` in TTL, expiration, ordering, or cache-eviction unit tests due to platform timer granularity (e.g. Windows default timer resolution of ~15.6ms) and CI jitter under load; prefer controllable clocks (`nowFunc` / mock clock), explicit timestamp manipulation, or deterministic synchronization primitives.
 - Note: if modifying features that involve CLIProxyAPIHome, check if corresponding updates are needed in the CLIProxyAPIHome repository.
 - Endpoints under the `/v0/management` base URL are deprecated and no longer maintained. For any feature changes, do not modify endpoints under `/v0/management` unless necessary to fix compilation errors.

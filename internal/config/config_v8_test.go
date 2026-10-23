@@ -960,3 +960,91 @@ func TestV8RequestHistoryPath(t *testing.T) {
 		t.Fatalf("legacy request history config = %+v", legacy.RequestHistory)
 	}
 }
+
+func TestV8UsageHistoryPath(t *testing.T) {
+	cfg, err := ParseConfigBytes([]byte(`config-version: 8
+observability:
+  usage:
+    usage-history:
+      enabled: true
+      retention-days: 730
+      prices:
+        disable-remote: true
+        remote-url: https://mirror.example/prices.json
+        models:
+          - model: claude-opus-4-6-thinking
+            provider: antigravity
+            same-as: claude-opus-4-6
+          - model: claude-opus-5-5
+            cache-write-1h: 8
+          - model: my-local-model
+            input: 0
+            output: 0.5
+            reasoning: 1.5
+            cache-read: 0.05
+            cache-write-5m: 0.625
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := cfg.UsageHistory
+	if !history.Enabled || history.RetentionDays != 730 {
+		t.Fatalf("usage history config = %+v", history)
+	}
+	if !history.Prices.DisableRemote || history.Prices.RemoteURL != "https://mirror.example/prices.json" {
+		t.Fatalf("usage history prices = %+v", history.Prices)
+	}
+	models := history.Prices.Models
+	if len(models) != 3 {
+		t.Fatalf("price overrides = %+v, want 3", models)
+	}
+	sameAs := models[0]
+	if sameAs.Model != "claude-opus-4-6-thinking" || sameAs.Provider != "antigravity" || sameAs.SameAs != "claude-opus-4-6" ||
+		sameAs.Input != nil || sameAs.Output != nil || sameAs.CacheWrite1h != nil {
+		t.Fatalf("same-as override = %+v", sameAs)
+	}
+	partial := models[1]
+	if partial.CacheWrite1h == nil || *partial.CacheWrite1h != 8 || partial.Input != nil || partial.CacheWrite5m != nil {
+		t.Fatalf("partial override = %+v", partial)
+	}
+	full := models[2]
+	if full.Input == nil || *full.Input != 0 || full.Output == nil || *full.Output != 0.5 ||
+		full.Reasoning == nil || *full.Reasoning != 1.5 || full.CacheRead == nil || *full.CacheRead != 0.05 ||
+		full.CacheWrite5m == nil || *full.CacheWrite5m != 0.625 || full.CacheWrite1h != nil {
+		t.Fatalf("full override = %+v", full)
+	}
+
+	legacy, err := ParseConfigBytes([]byte("usage-history:\n  enabled: true\n  retention-days: 30\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !legacy.UsageHistory.Enabled || legacy.UsageHistory.RetentionDays != 30 {
+		t.Fatalf("legacy usage history config = %+v", legacy.UsageHistory)
+	}
+	migrated, _, err := NormalizeConfigLayout([]byte("usage-history:\n  enabled: true\n  prices:\n    models:\n      - model: m\n        same-as: k\n"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var layout map[string]any
+	if errUnmarshal := yaml.Unmarshal(migrated, &layout); errUnmarshal != nil {
+		t.Fatal(errUnmarshal)
+	}
+	if _, legacyRoot := layout["usage-history"]; legacyRoot {
+		t.Fatalf("migrated config keeps the legacy root:\n%s", migrated)
+	}
+	reparsed, err := ParseConfigBytes(migrated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reparsed.UsageHistory.Enabled || len(reparsed.UsageHistory.Prices.Models) != 1 || reparsed.UsageHistory.Prices.Models[0].SameAs != "k" {
+		t.Fatalf("migrated usage history config = %+v from:\n%s", reparsed.UsageHistory, migrated)
+	}
+
+	defaults, err := ParseConfigBytes([]byte("config-version: 8\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.UsageHistory.Enabled || defaults.UsageHistory.RetentionDays != 0 || len(defaults.UsageHistory.Prices.Models) != 0 {
+		t.Fatalf("default usage history config = %+v, want disabled and unset", defaults.UsageHistory)
+	}
+}

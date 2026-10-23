@@ -91,6 +91,8 @@ export interface ForecastAttributionRow {
 
 export interface ForecastAttribution {
   method: ForecastAttributionMethod;
+  /** Why attribution is empty, e.g. `usage_history_disabled`. Null when it ran. */
+  reason: string | null;
   r2: number | null;
   rows: number;
   models: ForecastAttributionRow[];
@@ -261,6 +263,7 @@ function readAttribution(raw: unknown): ForecastAttribution | null {
   const attribution = asRecord(raw);
   return {
     method: pick(attribution.method, ['nnls', 'proportional', 'none'] as const, 'none'),
+    reason: str(attribution.reason) || null,
     r2: numOrNull(attribution.r2),
     rows: num(attribution.rows),
     models: asArray(attribution.models).map(readAttributionRow),

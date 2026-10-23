@@ -14,6 +14,7 @@ export * from './models';
 export * from './metaQuota';
 export * from './quotaForecast';
 export * from './requestLog';
+export * from './usageHistory';
 export * from './plugins';
 export * from './transformers';
 export * from './vertex';

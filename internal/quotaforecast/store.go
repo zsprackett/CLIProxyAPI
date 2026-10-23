@@ -33,11 +33,10 @@ const (
 	resetJitter = 10 * time.Minute
 )
 
-// history holds recorded quota series, hourly token usage and alert state.
+// history holds recorded quota series and alert state.
 type history struct {
 	mu     sync.Mutex
 	series map[string]*Series
-	usage  map[usageKey]*UsageBucket
 	alerts map[string]*alertRecord
 	since  int64
 	dirty  bool
@@ -49,7 +48,6 @@ type history struct {
 func newHistory() *history {
 	return &history{
 		series: make(map[string]*Series),
-		usage:  make(map[usageKey]*UsageBucket),
 		alerts: make(map[string]*alertRecord),
 	}
 }
@@ -93,21 +91,6 @@ func (h *history) observe(authID string, w coreauth.QuotaWindow) bool {
 	return true
 }
 
-// addUsage merges one usage bucket into the hourly aggregates.
-func (h *history) addUsage(b UsageBucket) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	key := b.key()
-	if existing := h.usage[key]; existing != nil {
-		existing.Requests += b.Requests
-		existing.Tokens += b.Tokens
-	} else {
-		copyBucket := b
-		h.usage[key] = &copyBucket
-	}
-	h.dirty = true
-}
-
 // compact drops data older than retention and thins points older than
 // fullResolutionAge to one per thinnedBucket. Points that start a new reset cycle
 // are always kept so burn calculations still see every reset.
@@ -143,20 +126,14 @@ func (h *history) compact(now time.Time, retention time.Duration) {
 		}
 		s.Points = kept
 	}
-	for key, b := range h.usage {
-		if b.Hour < cutoff {
-			delete(h.usage, key)
-			h.dirty = true
-		}
-	}
 	if h.since != 0 && h.since < cutoff {
 		h.since = cutoff
 	}
 }
 
-// snapshot returns deep copies of the series (optionally filtered by provider),
-// usage buckets and alert records.
-func (h *history) snapshot(provider string) ([]Series, []UsageBucket, []alertRecord, int64) {
+// snapshot returns deep copies of the series (optionally filtered by provider)
+// and alert records.
+func (h *history) snapshot(provider string) ([]Series, []alertRecord, int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	series := make([]Series, 0, len(h.series))
@@ -174,16 +151,12 @@ func (h *history) snapshot(provider string) ([]Series, []UsageBucket, []alertRec
 		}
 		return series[i].AuthID < series[j].AuthID
 	})
-	usage := make([]UsageBucket, 0, len(h.usage))
-	for _, b := range h.usage {
-		usage = append(usage, *b)
-	}
 	alerts := make([]alertRecord, 0, len(h.alerts))
 	for _, a := range h.alerts {
 		alerts = append(alerts, *a)
 	}
 	sort.Slice(alerts, func(i, j int) bool { return alerts[i].Class < alerts[j].Class })
-	return series, usage, alerts, h.since
+	return series, alerts, h.since
 }
 
 // load replaces the in-memory history with the contents of path. A missing file
@@ -222,11 +195,6 @@ func (h *history) load(path string) error {
 		sort.Slice(s.Points, func(i, j int) bool { return s.Points[i].T < s.Points[j].T })
 		h.series[seriesKey(s.AuthID, s.Class)] = s
 	}
-	h.usage = make(map[usageKey]*UsageBucket, len(data.Usage))
-	for i := range data.Usage {
-		b := data.Usage[i]
-		h.usage[b.key()] = &b
-	}
 	h.alerts = make(map[string]*alertRecord, len(data.Alerts))
 	for _, a := range data.Alerts {
 		if a != nil && a.Class != "" {
@@ -250,9 +218,6 @@ func (h *history) save(path string, now time.Time) error {
 		copySeries := *s
 		copySeries.Points = append([]Point(nil), s.Points...)
 		data.Series = append(data.Series, &copySeries)
-	}
-	for _, b := range h.usage {
-		data.Usage = append(data.Usage, *b)
 	}
 	for _, a := range h.alerts {
 		copyAlert := *a

@@ -127,6 +127,39 @@ func TestBuildConfigChangeDetails(t *testing.T) {
 	expectContains(t, details, "  provider updated: compat-a (models 1 -> 2)")
 }
 
+func TestBuildConfigChangeDetails_UsageHistory(t *testing.T) {
+	price := 8.0
+	oldCfg := &config.Config{UsageHistory: config.UsageHistoryConfig{
+		RetentionDays: 365,
+		Prices: config.UsagePricesConfig{
+			RemoteURL: "https://old.example/prices.json",
+			Models:    []config.ModelPriceOverride{{Model: "a"}, {Model: "b"}},
+		},
+	}}
+	newCfg := &config.Config{UsageHistory: config.UsageHistoryConfig{
+		Enabled:       true,
+		RetentionDays: 730,
+		Prices: config.UsagePricesConfig{
+			DisableRemote: true,
+			RemoteURL:     "https://new.example/prices.json",
+			Models:        []config.ModelPriceOverride{{Model: "a"}, {Model: "b"}, {Model: "c", CacheWrite1h: &price}},
+		},
+	}}
+
+	details := BuildConfigChangeDetails(oldCfg, newCfg)
+
+	expectContains(t, details, "usage-history.enabled: false -> true")
+	expectContains(t, details, "usage-history.retention-days: 365 -> 730")
+	expectContains(t, details, "usage-history.prices.disable-remote: false -> true")
+	expectContains(t, details, "usage-history.prices.remote-url: changed")
+	expectContains(t, details, "usage-history.prices.models: 2 -> 3 overrides")
+
+	sameCount := &config.Config{UsageHistory: config.UsageHistoryConfig{Prices: config.UsagePricesConfig{
+		Models: []config.ModelPriceOverride{{Model: "a"}, {Model: "b", SameAs: "c"}},
+	}}}
+	expectContains(t, BuildConfigChangeDetails(oldCfg.CloneForRuntime(), sameCount), "usage-history.prices.models: 2 -> 2 overrides")
+}
+
 func TestBuildConfigChangeDetails_NoChanges(t *testing.T) {
 	cfg := &config.Config{
 		Port: 8080,

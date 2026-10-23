@@ -46,6 +46,7 @@ describe('normalizeQuotaForecast', () => {
     ]);
     expect(pool.hourlyBurn[0]).toEqual({ hourStartMs: NOW_MS - H_MS, accounts: 0.2, coverage: 1 });
     expect(pool.attribution?.method).toBe('nnls');
+    expect(pool.attribution?.reason).toBeNull();
     expect(pool.attribution?.clients[0]).toMatchObject({ keyMasked: 'sk**********ha', share: 0.6 });
 
     expect(weekly.pace).toBeNull();
