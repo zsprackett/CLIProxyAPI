@@ -4,7 +4,9 @@ import {
   OTHER_COLOR,
   OTHER_SERIES,
   TOKEN_TYPE_COLOR,
+  TREND_WINDOW,
   buildStacks,
+  buildTrend,
   buildUsageChartGeometry,
   niceTicks,
 } from '@/features/usage/usageChartModel';
@@ -184,5 +186,177 @@ describe('buildUsageChartGeometry', () => {
     expect(geometry.rects).toEqual([]);
     expect(geometry.columns).toEqual([]);
     expect(geometry.yTicks.map((tick) => tick.value)).toEqual([0, 1]);
+  });
+});
+
+describe('buildTrend', () => {
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+  const day = (index: number) => ({
+    startMs: index * DAY,
+    endMs: (index + 1) * DAY,
+    groups: [],
+  });
+  const days = (count: number) => Array.from({ length: count }, (_, index) => day(index));
+  const hours = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      startMs: index * HOUR,
+      endMs: (index + 1) * HOUR,
+      groups: [],
+    }));
+  const base = { unit: 'day', metric: 'tokens', asOfMs: null, recordingSinceMs: null } as const;
+
+  test('windows are 24 hours, 7 days and 3 months', () => {
+    expect(TREND_WINDOW).toEqual({ hour: 24, day: 7, month: 3 });
+  });
+
+  test('off returns no points and no slope', () => {
+    const trend = buildTrend([1, 2, 3], days(3), { ...base, mode: 'off' });
+    expect(trend).toEqual({ points: [null, null, null], slopePerBucket: null });
+  });
+
+  test('average uses a partial window at the start and a full 7-day window after', () => {
+    const totals = [10, 20, 30, 40, 50, 60, 70, 80];
+    const { points, slopePerBucket } = buildTrend(totals, days(8), { ...base, mode: 'average' });
+    expect(points[0]).toBe(10);
+    expect(points[1]).toBe(15);
+    expect(points[6]).toBe(40);
+    expect(points[7]).toBe(50);
+    expect(slopePerBucket).toBeNull();
+  });
+
+  test('average window follows the bucket unit', () => {
+    const totals = Array.from({ length: 25 }, (_, index) => (index === 0 ? 24 : 0));
+    const { points } = buildTrend(totals, hours(25), { ...base, unit: 'hour', mode: 'average' });
+    expect(points[23]).toBe(1);
+    expect(points[24]).toBe(0);
+  });
+
+  test('the in-progress bucket is excluded and never enters a window', () => {
+    const { points } = buildTrend([10, 20, 1000], days(3), {
+      ...base,
+      mode: 'average',
+      asOfMs: 2.5 * DAY,
+    });
+    expect(points).toEqual([10, 15, null]);
+  });
+
+  test('buckets before recording started are excluded, not counted as zero', () => {
+    const { points } = buildTrend([0, 0, 30, 50], days(4), {
+      ...base,
+      mode: 'average',
+      recordingSinceMs: 2 * DAY,
+    });
+    expect(points).toEqual([null, null, 30, 40]);
+  });
+
+  test('a bucket that recording covers only in part is excluded', () => {
+    const { points } = buildTrend([5, 50, 50], days(3), {
+      ...base,
+      mode: 'average',
+      recordingSinceMs: 0.6 * DAY,
+    });
+    expect(points).toEqual([null, 50, 50]);
+  });
+
+  test('the average window spans bucket positions, so a skipped bucket does not pull in older ones', () => {
+    const cell = (costUsd: number | null) => ({ costUsd }) as never;
+    const buckets = days(9).map((bucket, index) => ({
+      ...bucket,
+      groups: [cell(index === 3 ? null : 1)],
+    }));
+    const totals = [1000, 1000, 10, 0, 10, 10, 10, 10, 10];
+    const { points } = buildTrend(totals, buckets, { ...base, metric: 'cost', mode: 'average' });
+    expect(points[3]).toBeNull();
+    expect(points[8]).toBe(10);
+  });
+
+  test('cost skips buckets where no cell could be priced, other metrics keep them', () => {
+    const cell = (costUsd: number | null) => ({ costUsd }) as never;
+    const buckets = [
+      { ...day(0), groups: [cell(null), cell(null)] },
+      { ...day(1), groups: [cell(null), cell(4)] },
+      { ...day(2), groups: [cell(8)] },
+    ];
+    const cost = buildTrend([0, 4, 8], buckets, { ...base, metric: 'cost', mode: 'average' });
+    expect(cost.points).toEqual([null, 4, 6]);
+    const requests = buildTrend([3, 3, 3], buckets, {
+      ...base,
+      metric: 'requests',
+      mode: 'average',
+    });
+    expect(requests.points).toEqual([3, 3, 3]);
+  });
+
+  test('linear fits totals 1,2,3,4 with slope 1', () => {
+    const { points, slopePerBucket } = buildTrend([1, 2, 3, 4], days(4), {
+      ...base,
+      mode: 'linear',
+    });
+    expect(slopePerBucket).toBeCloseTo(1, 10);
+    points.forEach((point, index) => expect(point).toBeCloseTo(index + 1, 10));
+  });
+
+  test('linear extends across the in-progress bucket and starts at the first eligible one', () => {
+    const { points } = buildTrend([0, 2, 4, 99], days(4), {
+      ...base,
+      mode: 'linear',
+      recordingSinceMs: DAY,
+      asOfMs: 3.5 * DAY,
+    });
+    expect(points[0]).toBeNull();
+    expect(points[1]).toBeCloseTo(2, 10);
+    expect(points[2]).toBeCloseTo(4, 10);
+    expect(points[3]).toBeCloseTo(6, 10);
+  });
+
+  test('linear with fewer than two eligible buckets returns nulls', () => {
+    const trend = buildTrend([5, 7], days(2), { ...base, mode: 'linear', asOfMs: 1.5 * DAY });
+    expect(trend).toEqual({ points: [null, null], slopePerBucket: null });
+  });
+});
+
+describe('buildUsageChartGeometry trend', () => {
+  const buckets = Array.from({ length: 4 }, (_, index) => ({
+    startMs: index * 1000,
+    endMs: (index + 1) * 1000,
+    groups: [],
+  }));
+  const stacks = { series: [], totals: [1, 1, 1, 1] };
+  const size = { width: 400, height: 100 };
+
+  test('the y scale grows to include the highest trend point', () => {
+    const plain = buildUsageChartGeometry(stacks, buckets, size);
+    const trend = { points: [1, 1, 1, 50], slopePerBucket: null };
+    const withTrend = buildUsageChartGeometry(stacks, buckets, size, trend);
+    expect(withTrend.yTicks[withTrend.yTicks.length - 1].value).toBeGreaterThanOrEqual(50);
+    expect(plain.yTicks[plain.yTicks.length - 1].value).toBeLessThan(50);
+    expect(withTrend.trendPath[0][3].y).toBeGreaterThanOrEqual(0);
+  });
+
+  test('segments break on null and sit at bucket centers', () => {
+    const trend = { points: [1, null, 1, 1], slopePerBucket: null };
+    const { trendPath } = buildUsageChartGeometry(stacks, buckets, size, trend);
+    expect(trendPath.map((segment) => segment.map((point) => point.x))).toEqual([[50], [250, 350]]);
+  });
+
+  test('a line that falls below zero stops where it crosses the baseline', () => {
+    const trend = { points: [10, -10, -30, null], slopePerBucket: null };
+    const { trendPath, plot } = buildUsageChartGeometry(stacks, buckets, size, trend);
+    expect(trendPath).toHaveLength(1);
+    expect(trendPath[0]).toHaveLength(2);
+    expect(trendPath[0][1]).toEqual({ x: 100, y: plot.bottom });
+  });
+
+  test('a line that rises from below zero starts where it crosses the baseline', () => {
+    const trend = { points: [-10, 10, null, null], slopePerBucket: null };
+    const { trendPath, plot } = buildUsageChartGeometry(stacks, buckets, size, trend);
+    expect(trendPath).toHaveLength(1);
+    expect(trendPath[0][0]).toEqual({ x: 100, y: plot.bottom });
+    expect(trendPath[0][1].x).toBe(150);
+  });
+
+  test('no trend means no path', () => {
+    expect(buildUsageChartGeometry(stacks, buckets, size).trendPath).toEqual([]);
   });
 });
