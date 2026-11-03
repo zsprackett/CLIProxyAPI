@@ -10,6 +10,7 @@ import {
 import {
   RANGE_PRESETS,
   STACK_BYS,
+  TREND_MODES,
   USAGE_METRICS,
   allowedUnits,
   applyPreset,
@@ -182,6 +183,13 @@ export function UsageControls({
           text={(stackBy) => t(`usage.stack_${stackBy}`)}
           disabled={(stackBy) => stackBy === 'tokenType' && controls.metric === 'requests'}
           onChange={(stackBy) => set('stackBy', stackBy)}
+        />
+        <Pills
+          label={t('usage.trend')}
+          values={TREND_MODES}
+          value={controls.trend}
+          text={(mode) => t(`usage.trend_${mode}`)}
+          onChange={(trend) => set('trend', trend)}
         />
       </div>
     </div>
