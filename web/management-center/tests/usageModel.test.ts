@@ -8,6 +8,7 @@ import {
   bucketLabels,
   controlsToQuery,
   coversToday,
+  formatSigned,
   formatTokens,
   formatUsd,
   groupLabel,
@@ -223,5 +224,23 @@ describe('summary', () => {
     expect(formatUsd(1234.5, 'en')).toBe('$1,234.50');
     expect(formatTokens(86200, 'en')).toBe('86.2K');
     expect(formatTokens(950, 'en')).toBe('950');
+  });
+});
+
+test('the trend line is off by default', () => {
+  expect(DEFAULT_USAGE_CONTROLS.trend).toBe('off');
+});
+
+describe('formatSigned', () => {
+  const usd = (value: number) => formatUsd(value, 'en-US');
+  test('rises and falls use the same precision', () => {
+    expect(formatSigned(1.2, usd)).toBe('+$1.20');
+    expect(formatSigned(-1.2, usd)).toBe('-$1.20');
+    expect(formatSigned(0.004, usd)).toBe('+$0.0040');
+    expect(formatSigned(-0.004, usd)).toBe('-$0.0040');
+  });
+  test('floating-point noise around zero has no sign', () => {
+    expect(formatSigned(-1e-17, usd)).toBe('$0.00');
+    expect(formatSigned(0, usd)).toBe('$0.00');
   });
 });

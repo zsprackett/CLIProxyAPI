@@ -88,6 +88,31 @@
   vector-effect: non-scaling-stroke;
 }
 
+.trendLine {
+  fill: none;
+  stroke: var(--usage-trend);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.trendDashed {
+  stroke-dasharray: 6 4;
+}
+
+.trendSwatch {
+  width: 16px;
+  height: 4px;
+  flex: none;
+  overflow: visible;
+
+  line {
+    stroke: var(--usage-trend);
+    stroke-width: 2;
+  }
+}
+
 .hoverColumn {
   fill: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }

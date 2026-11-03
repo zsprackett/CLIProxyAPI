@@ -4,6 +4,7 @@ import ru from '@/i18n/locales/ru.json';
 import zhCN from '@/i18n/locales/zh-CN.json';
 import zhTW from '@/i18n/locales/zh-TW.json';
 import { RANGE_PRESETS, STACK_BYS, USAGE_METRICS } from '@/features/usage/usageModel';
+import { TREND_WINDOW } from '@/features/usage/usageChartModel';
 import { USAGE_DIMENSIONS, USAGE_TOKEN_TYPES, USAGE_UNITS } from '@/services/api/usageHistory';
 
 type Locale = {
@@ -56,4 +57,12 @@ test('every key the page builds from a value exists', () => {
     ...['builtin', 'remote', 'override'].map((source) => `source_${source}`),
   ];
   for (const key of dynamic) expect(strings[key]).toBeTruthy();
+});
+
+test('the moving-average legend names the window that the chart uses', () => {
+  for (const locale of [en, zhCN, zhTW, ru] as Locale[]) {
+    for (const unit of USAGE_UNITS) {
+      expect(locale.usage[`trend_legend_average_${unit}`]).toContain(String(TREND_WINDOW[unit]));
+    }
+  }
 });

@@ -137,6 +137,7 @@ export function UsageView({
                 report={report}
                 metric={controls.metric}
                 stackBy={controls.stackBy}
+                trend={controls.trend}
                 seriesLabel={seriesLabel}
                 locale={locale}
               />

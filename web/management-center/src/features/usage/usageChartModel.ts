@@ -14,9 +14,10 @@ import {
   USAGE_TOKEN_TYPES,
   type UsageBucket,
   type UsageReport,
+  type UsageUnit,
   type UsageTokenType,
 } from '@/services/api/usageHistory';
-import { metricValue, type StackBy, type UsageMetric } from './usageModel';
+import { metricValue, type StackBy, type TrendMode, type UsageMetric } from './usageModel';
 
 export const MAX_SERIES = 8;
 export const OTHER_COLOR = 8;
@@ -126,6 +127,81 @@ export function buildStacks(
   return { series, totals };
 }
 
+/** Buckets averaged by the moving-average trend, per bucket unit. */
+export const TREND_WINDOW: Record<UsageUnit, number> = { hour: 24, day: 7, month: 3 };
+
+export interface Trend {
+  /** One value per bucket, aligned with the buckets; null where there is no trend. */
+  points: (number | null)[];
+  /** Linear mode only: change of the fitted line per bucket. */
+  slopePerBucket: number | null;
+}
+
+/**
+ * Totals -> trend line. Only complete buckets with known values count. Skipped:
+ * the in-progress bucket (ends after asOfMs), buckets that start before
+ * recording started (no or partial data, which is not low usage), and for cost,
+ * buckets where no cell could be priced (unknown cost, which is not zero cost).
+ *  average: mean of the counted buckets among the last TREND_WINDOW[unit]
+ *    bucket positions. A skipped bucket shrinks the window; it never reaches back.
+ *  linear: least squares over bucket index, drawn from the first counted bucket
+ *    to the last bucket so it runs through the in-progress one. Negatives are kept.
+ */
+export function buildTrend(
+  totals: readonly number[],
+  buckets: readonly UsageBucket[],
+  opts: {
+    mode: TrendMode;
+    unit: UsageUnit;
+    metric: UsageMetric;
+    asOfMs: number | null;
+    recordingSinceMs: number | null;
+  }
+): Trend {
+  const { mode, unit, metric, asOfMs, recordingSinceMs } = opts;
+  const points: (number | null)[] = buckets.map(() => null);
+  const none: Trend = { points, slopePerBucket: null };
+  if (mode === 'off') return none;
+
+  const eligible: number[] = [];
+  buckets.forEach((bucket, index) => {
+    if (asOfMs !== null && bucket.endMs > asOfMs) return;
+    if (recordingSinceMs !== null && bucket.startMs < recordingSinceMs) return;
+    const unpriced =
+      bucket.groups.length > 0 && bucket.groups.every((group) => group.costUsd === null);
+    if (metric === 'cost' && unpriced) return;
+    eligible.push(index);
+  });
+
+  if (mode === 'average') {
+    const window = TREND_WINDOW[unit];
+    for (const bucketIndex of eligible) {
+      const inWindow = eligible.filter(
+        (index) => index > bucketIndex - window && index <= bucketIndex
+      );
+      points[bucketIndex] =
+        inWindow.reduce((sum, index) => sum + (totals[index] ?? 0), 0) / inWindow.length;
+    }
+    return none;
+  }
+
+  if (eligible.length < 2) return none;
+  const n = eligible.length;
+  const meanX = eligible.reduce((sum, index) => sum + index, 0) / n;
+  const meanY = eligible.reduce((sum, index) => sum + (totals[index] ?? 0), 0) / n;
+  let covariance = 0;
+  let variance = 0;
+  for (const index of eligible) {
+    covariance += (index - meanX) * ((totals[index] ?? 0) - meanY);
+    variance += (index - meanX) ** 2;
+  }
+  const slope = covariance / variance;
+  for (let index = eligible[0]; index < buckets.length; index += 1) {
+    points[index] = meanY + slope * (index - meanX);
+  }
+  return { points, slopePerBucket: slope };
+}
+
 export interface ChartSize {
   width: number;
   height: number;
@@ -151,6 +227,8 @@ export interface UsageChartGeometry {
   xLabels: { x: number; bucketIndex: number }[];
   /** Hit areas for the hover tooltip, one per bucket (full plot height). */
   columns: { x: number; width: number; bucketIndex: number }[];
+  /** Trend polyline segments, broken at null points and cut where the line crosses below zero. */
+  trendPath: { x: number; y: number }[][];
 }
 
 const MAX_X_LABELS = 12;
@@ -176,11 +254,15 @@ export function niceTicks(max: number, count: number): number[] {
 export function buildUsageChartGeometry(
   stacks: Stacks,
   buckets: readonly UsageBucket[],
-  size: ChartSize
+  size: ChartSize,
+  trend?: Trend
 ): UsageChartGeometry {
   const { width, height } = size;
   const count = buckets.length;
-  const ticks = niceTicks(Math.max(0, ...stacks.totals), 4);
+  const ticks = niceTicks(
+    Math.max(0, ...stacks.totals, ...(trend?.points ?? []).filter((v): v is number => v !== null)),
+    4
+  );
   const yMax = ticks[ticks.length - 1];
   const scale = (value: number) => (value / yMax) * height;
 
@@ -215,11 +297,37 @@ export function buildUsageChartGeometry(
     xLabels.push({ x: bucketIndex * slot + slot / 2, bucketIndex });
   }
 
+  const trendPath: UsageChartGeometry['trendPath'] = [];
+  const center = (bucketIndex: number) => bucketIndex * slot + slot / 2;
+  let segment: { x: number; y: number }[] = [];
+  const flush = () => {
+    if (segment.length > 0) trendPath.push(segment);
+    segment = [];
+  };
+  let previous: { bucketIndex: number; value: number } | null = null;
+  (trend?.points ?? []).forEach((value, bucketIndex) => {
+    if (value === null) {
+      flush();
+      previous = null;
+      return;
+    }
+    if (previous && previous.value < 0 !== value < 0) {
+      const t = previous.value / (previous.value - value);
+      const from = center(previous.bucketIndex);
+      segment.push({ x: from + t * (center(bucketIndex) - from), y: height });
+      if (value < 0) flush();
+    }
+    if (value >= 0) segment.push({ x: center(bucketIndex), y: height - scale(value) });
+    previous = { bucketIndex, value };
+  });
+  flush();
+
   return {
     plot: { left: 0, top: 0, right: width, bottom: height },
     rects,
     yTicks: ticks.map((value) => ({ y: height - scale(value), value })),
     xLabels,
     columns: buckets.map((_, bucketIndex) => ({ x: bucketIndex * slot, width: slot, bucketIndex })),
+    trendPath,
   };
 }

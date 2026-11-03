@@ -22,6 +22,9 @@ export type UsageMetric = (typeof USAGE_METRICS)[number];
 /** Stack bars by the group dimension, or by token type (uncached, cache read, 5m/1h writes...). */
 export const STACK_BYS = ['group', 'tokenType'] as const;
 export type StackBy = (typeof STACK_BYS)[number];
+/** Trend line over the per-bucket totals: none, trailing moving average, or least-squares line. */
+export const TREND_MODES = ['off', 'average', 'linear'] as const;
+export type TrendMode = (typeof TREND_MODES)[number];
 
 /** Everything the user can set. Lives in UsagePage state. */
 export interface UsageControls {
@@ -34,6 +37,7 @@ export interface UsageControls {
   filter: UsageFilter;
   metric: UsageMetric;
   stackBy: StackBy;
+  trend: TrendMode;
 }
 
 export const DEFAULT_USAGE_CONTROLS: UsageControls = {
@@ -45,6 +49,7 @@ export const DEFAULT_USAGE_CONTROLS: UsageControls = {
   filter: {},
   metric: 'cost',
   stackBy: 'group',
+  trend: 'off',
 };
 
 /** Server span limits, mirrored so the UI never sends a 400. Spans count both ends. */
@@ -316,6 +321,13 @@ export function formatUsd(value: number | null, locale: string): string {
     minimumFractionDigits: small ? 4 : 2,
     maximumFractionDigits: small ? 4 : 2,
   }).format(value);
+}
+
+/** A change with an explicit sign; the magnitude is formatted, so rises and falls share precision. */
+export function formatSigned(value: number, format: (magnitude: number) => string): string {
+  const rounded = Math.abs(value) < 1e-9 ? 0 : value;
+  const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : '';
+  return sign + format(Math.abs(rounded));
 }
 
 export function formatTokens(value: number, locale: string): string {
