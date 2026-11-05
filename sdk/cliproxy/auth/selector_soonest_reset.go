@@ -19,9 +19,10 @@ const weeklyWindowMinutes = 7 * 24 * 60
 //
 // Reset times come from the credential's quota snapshot. A window scoped to the
 // requested model's family (Claude's Fable 7d_oi window) is preferred over the
-// credential-wide one. Credentials without a known future reset, either never observed
-// or with a reset that already passed, are picked first so a single request can learn
-// their current window. Ties fall back to ID order, which makes providers without quota
+// credential-wide one. A Claude credential never observed is picked first so a single
+// request can learn its window, and one whose weekly reset passed is ordered by that
+// reset rolled forward by whole weeks. A Codex credential without a known future reset
+// is picked last. Ties fall back to ID order, which makes providers without quota
 // signals behave like fill-first.
 type SoonestResetSelector struct{}
 
@@ -90,6 +91,9 @@ func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank 
 		return rank
 	}
 	provider := auth.QuotaSnapshot.Provider
+	if provider == "" {
+		provider, _ = providerKindOf(auth.Provider)
+	}
 	scope := quotaScopeOf(provider, model)
 	var applicable []QuotaWindowObs
 	maxCodexUsed, codexUsedKnown := 0.0, false
@@ -106,8 +110,16 @@ func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank 
 		}
 	}
 	bestRank := -1
+	passedRank := -1
+	var passedReset time.Time
 	for _, window := range applicable {
 		if !window.ResetAt.After(now) {
+			if class := window.Class(provider); !window.ResetAt.IsZero() && (class == "claude:7d" || class == "claude:7d_oi") {
+				if windowRank := weeklyResetRank(class, window.ModelScope != ""); passedRank < 0 || windowRank < passedRank {
+					passedRank = windowRank
+					passedReset = window.ResetAt
+				}
+			}
 			continue
 		}
 		if windowExhausted(window, provider, maxCodexUsed, codexUsedKnown) {
@@ -122,7 +134,35 @@ func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank 
 			rank.weeklyReset = window.ResetAt
 		}
 	}
+	if bestRank < 0 {
+		rank.weeklyReset = unknownWeeklyReset(provider, passedReset, now)
+	}
 	return rank
+}
+
+// unknownResetLast sorts after every real reset time.
+var unknownResetLast = time.Unix(1<<62, 0)
+
+// unknownWeeklyReset places a credential with no future weekly reset. A Claude weekly
+// window runs on a fixed per-account schedule, so a passed reset is rolled forward by
+// whole weeks to the next boundary, and a credential never observed sorts first so one
+// request learns its window. A Codex weekly window usually starts at first use, so a
+// Codex credential with no known reset sorts last, behind those with a known reset:
+// starting its window early can waste it. Other providers keep the zero time, which
+// sorts first and ties by ID.
+func unknownWeeklyReset(provider ProviderKind, passedReset, now time.Time) time.Time {
+	switch provider {
+	case ProviderClaude:
+		if passedReset.IsZero() {
+			return time.Time{}
+		}
+		const week = 7 * 24 * time.Hour
+		return passedReset.Add(week * (now.Sub(passedReset)/week + 1))
+	case ProviderCodex:
+		return unknownResetLast
+	default:
+		return time.Time{}
+	}
 }
 
 // windowExhausted reports whether window has no room left. Codex sets one

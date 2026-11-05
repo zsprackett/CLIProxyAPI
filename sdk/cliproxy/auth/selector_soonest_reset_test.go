@@ -72,7 +72,7 @@ func TestSoonestResetSelectorPick_SkipsCoolingDownAuth(t *testing.T) {
 	}
 }
 
-func TestSoonestResetSelectorPick_ProbesUnknownAndStaleResetsFirst(t *testing.T) {
+func TestSoonestResetSelectorPick_ProbesUnknownFirstAndRollsStaleResetForward(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -86,8 +86,8 @@ func TestSoonestResetSelectorPick_ProbesUnknownAndStaleResetsFirst(t *testing.T)
 	if err != nil {
 		t.Fatalf("Pick() error = %v", err)
 	}
-	if got.ID != "c" {
-		t.Fatalf("Pick() auth.ID = %q, want %q (stale reset sorts with unknown, ties by ID)", got.ID, "c")
+	if got.ID != "d" {
+		t.Fatalf("Pick() auth.ID = %q, want %q (unknown sorts first, the stale reset rolls a week forward)", got.ID, "d")
 	}
 }
 
@@ -127,6 +127,7 @@ func TestRankSoonestReset_WeeklyCodex(t *testing.T) {
 				"X-Codex-Primary-Window-Minutes", "300",
 				"X-Codex-Primary-Reset-At", strconv.FormatInt(resetAt.Unix(), 10),
 			},
+			want: unknownResetLast,
 		},
 	}
 	for _, tt := range tests {
@@ -463,5 +464,69 @@ func TestSoonestResetSelectorPick_CodexWindowWithoutLengthDoesNotGate(t *testing
 	b := codexWeeklyAuth("b", 10, now.Add(3*day))
 	if got := pickSoonestReset(t, "codex", "", a, b); got != "a" {
 		t.Fatalf("Pick() = %q, want a", got)
+	}
+}
+
+func TestSoonestResetSelectorPick_UnknownResetsPerProvider(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	tests := []struct {
+		name     string
+		provider string
+		auths    []*Auth
+		want     string
+	}{
+		{
+			name:     "codex never observed loses to a weekly reset tomorrow",
+			provider: "codex",
+			auths:    []*Auth{{ID: "a", Provider: "codex"}, codexWeeklyAuth("b", 10, now.Add(day))},
+			want:     "b",
+		},
+		{
+			name:     "codex passed reset sorts last",
+			provider: "codex",
+			auths:    []*Auth{codexWeeklyAuth("a", 10, now.Add(-time.Hour)), codexWeeklyAuth("b", 10, now.Add(5*day))},
+			want:     "b",
+		},
+		{
+			name:     "claude never observed still sorts first",
+			provider: "claude",
+			auths:    []*Auth{claudeAuthResettingAt("a", now.Add(time.Hour)), {ID: "b", Provider: "claude"}},
+			want:     "b",
+		},
+		{
+			// 9 days ago rolls forward to 5 days from now, after "b" at 2 days.
+			name:     "claude passed reset rolls forward by whole weeks",
+			provider: "claude",
+			auths:    []*Auth{claudeAuthResettingAt("a", now.Add(-9*day)), claudeAuthResettingAt("b", now.Add(2*day))},
+			want:     "b",
+		},
+		{
+			// 13 days ago rolls forward to tomorrow, before "b" at 3 days.
+			name:     "claude passed reset rolling forward to tomorrow beats a later reset",
+			provider: "claude",
+			auths:    []*Auth{claudeAuthResettingAt("a", now.Add(-13*day)), claudeAuthResettingAt("b", now.Add(3*day))},
+			want:     "a",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickSoonestReset(t, tt.provider, "", tt.auths...); got != tt.want {
+				t.Fatalf("Pick() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRankSoonestReset_ClaudePassedResetRollsForward(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	passed := now.Add(-9 * day).Truncate(time.Second)
+	auth := claudeAuthResettingAt("a", passed)
+	want := passed.Add(2 * 7 * day)
+	if got := rankSoonestReset(auth, "", now).weeklyReset; !got.Equal(want) {
+		t.Fatalf("weeklyReset = %v, want %v", got, want)
 	}
 }
