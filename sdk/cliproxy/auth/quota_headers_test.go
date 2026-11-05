@@ -503,3 +503,24 @@ func TestRestoreCooldownRecordDoesNotOverwriteNewerSnapshotWindow(t *testing.T) 
 	}
 	headersTestAssertUsed(t, headersTestWindow(t, auth.QuotaSnapshot, "primary"), 77)
 }
+
+func TestClaudeHeadersObservation_RejectedStatusMarksLimitReached(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	h := http.Header{}
+	h.Set("Anthropic-Ratelimit-Unified-5h-Utilization", "0.5")
+	h.Set("Anthropic-Ratelimit-Unified-5h-Reset", strconv.FormatInt(now.Add(time.Hour).Unix(), 10))
+	h.Set("Anthropic-Ratelimit-Unified-5h-Status", "Rejected")
+	h.Set("Anthropic-Ratelimit-Unified-7d-Utilization", "0.5")
+	h.Set("Anthropic-Ratelimit-Unified-7d-Status", "allowed")
+	obs, ok := claudeHeadersObservation(h, "", now)
+	if !ok || len(obs.Windows) != 2 {
+		t.Fatalf("observation = %+v, ok = %v, want two windows", obs, ok)
+	}
+	for _, w := range obs.Windows {
+		if want := w.ID == "five_hour"; w.LimitReached != want {
+			t.Fatalf("window %s LimitReached = %v, want %v", w.ID, w.LimitReached, want)
+		}
+	}
+}

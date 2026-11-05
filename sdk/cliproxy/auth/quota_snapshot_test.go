@@ -334,7 +334,6 @@ func TestQuotaSnapshotLegacyRestore(t *testing.T) {
 	if len(records) == 0 {
 		t.Fatal("fixture has no records")
 	}
-	now := time.Date(2026, 10, 19, 18, 16, 29, 0, time.UTC)
 	m := NewManager(nil, nil, nil)
 	const authID = "claude-legacy@example.com.json"
 	if _, err := m.Register(context.Background(), &Auth{ID: authID, Provider: "claude", Status: StatusActive}); err != nil {
@@ -342,7 +341,7 @@ func TestQuotaSnapshotLegacyRestore(t *testing.T) {
 	}
 	m.mu.Lock()
 	for _, record := range records {
-		m.restoreQuotaObservationLocked(record, now)
+		m.restoreQuotaObservationLocked(record)
 	}
 	snapshot := m.auths[authID].QuotaSnapshot.Clone()
 	m.mu.Unlock()

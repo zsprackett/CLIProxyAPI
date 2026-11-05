@@ -368,10 +368,7 @@ func (m *Manager) observePolledQuota(authID string, obs QuotaObservation) (Quota
 	auth.Generation++
 	auth.UpdatedAt = now
 	snapshot := auth.Clone()
-	persist := m.cooldownStore != nil && now.Sub(m.observationPersistedAt) >= quotaObservationPersistInterval
-	if persist {
-		m.observationPersistedAt = now
-	}
+	persist := m.observationSaveDueLocked(now)
 	m.mu.Unlock()
 
 	if m.scheduler != nil {

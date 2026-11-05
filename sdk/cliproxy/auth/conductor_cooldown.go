@@ -323,7 +323,7 @@ func (m *Manager) RestoreCooldownStates(ctx context.Context) error {
 
 	m.mu.Lock()
 	for _, record := range records {
-		if m.restoreQuotaObservationLocked(record, now) {
+		if m.restoreQuotaObservationLocked(record) {
 			if auth := m.auths[strings.TrimSpace(record.AuthID)]; auth != nil {
 				snapshotsByID[auth.ID] = auth.Clone()
 			}
@@ -619,13 +619,46 @@ func (m *Manager) persistCooldownStatesToLocked(ctx context.Context, store Coold
 	return ctx.Err() == nil
 }
 
+// observationSaveDueLocked reports whether an observation made at now may be saved
+// immediately, and records the save when it may. Otherwise it schedules one trailing
+// save for when the interval since the last save ends, so the last observation of a
+// burst is not lost. At most one trailing save is pending. Caller holds m.mu.
+func (m *Manager) observationSaveDueLocked(now time.Time) bool {
+	if m.cooldownStore == nil {
+		return false
+	}
+	elapsed := max(now.Sub(m.observationPersistedAt), 0)
+	if elapsed >= quotaObservationPersistInterval {
+		m.observationPersistedAt = now
+		return true
+	}
+	if !m.observationSavePending {
+		m.observationSavePending = true
+		after := m.afterFunc
+		if after == nil {
+			after = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+		}
+		after(quotaObservationPersistInterval-elapsed, m.saveThrottledObservation)
+	}
+	return false
+}
+
+// saveThrottledObservation is the trailing save scheduled by observationSaveDueLocked.
+func (m *Manager) saveThrottledObservation() {
+	m.mu.Lock()
+	m.observationSavePending = false
+	m.observationPersistedAt = time.Now()
+	m.mu.Unlock()
+	m.persistCooldownStates(context.Background())
+}
+
 func (m *Manager) cooldownStateRecordsSnapshot() []CooldownStateRecord {
 	now := time.Now()
 	records := make([]CooldownStateRecord, 0)
 
 	m.mu.RLock()
 	for _, auth := range m.auths {
-		records = append(records, withQuotaObservations(auth, m.cooldownStateRecordsForAuthLocked(auth, now), now)...)
+		records = append(records, withQuotaObservations(auth, m.cooldownStateRecordsForAuthLocked(auth, now))...)
 	}
 	m.mu.RUnlock()
 
@@ -664,12 +697,12 @@ func (m *Manager) cooldownStateRecordsForAuthLocked(auth *Auth, now time.Time) [
 // auth-level record, adding an observation-only record where no cooldown
 // exists. Change detection does not use this, so a snapshot alone never
 // triggers a save outside the MarkResult throttle.
-func withQuotaObservations(auth *Auth, records []CooldownStateRecord, now time.Time) []CooldownStateRecord {
+func withQuotaObservations(auth *Auth, records []CooldownStateRecord) []CooldownStateRecord {
 	if auth == nil || auth.ID == "" || auth.Disabled || auth.Status == StatusDisabled {
 		return records
 	}
 	snapshot := auth.QuotaSnapshot.Clone()
-	if snapshot.Provider == "" || snapshot.UpdatedAt.IsZero() || now.Sub(snapshot.UpdatedAt) > quotaObservationRetention {
+	if snapshot.Provider == "" || snapshot.UpdatedAt.IsZero() {
 		return records
 	}
 	for i := range records {
@@ -694,10 +727,9 @@ func withQuotaObservations(auth *Auth, records []CooldownStateRecord, now time.T
 
 // restoreQuotaObservationLocked merges a saved snapshot into the auth. Per
 // window the newest observation wins, so a live response after startup is
-// kept. Windows older than the retention are pruned; extras are kept. A
-// legacy record that still carries quota.signals is converted once through the
-// header parsers.
-func (m *Manager) restoreQuotaObservationLocked(record CooldownStateRecord, now time.Time) bool {
+// kept, whatever the age of the saved windows. A legacy record that still
+// carries quota.signals is converted once through the header parsers.
+func (m *Manager) restoreQuotaObservationLocked(record CooldownStateRecord) bool {
 	auth := m.auths[strings.TrimSpace(record.AuthID)]
 	if auth == nil || auth.Disabled || auth.Status == StatusDisabled {
 		return false
@@ -711,16 +743,9 @@ func (m *Manager) restoreQuotaObservationLocked(record CooldownStateRecord, now 
 		if saved.Provider != kind {
 			return false
 		}
-		kept := saved.Windows[:0]
-		for _, window := range saved.Windows {
-			if !window.ObservedAt.IsZero() && now.Sub(window.ObservedAt) <= quotaObservationRetention {
-				kept = append(kept, window)
-			}
-		}
-		saved.Windows = kept
 		return auth.QuotaSnapshot.merge(saved)
 	}
-	obs, ok := legacyQuotaObservation(kind, record, now)
+	obs, ok := legacyQuotaObservation(kind, record)
 	if !ok {
 		return false
 	}
@@ -1077,8 +1102,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		if trackCooldownState {
 			cooldownRecordsAfter := m.cooldownStateRecordsForAuthLocked(auth, now)
 			cooldownStateChanged = !cooldownStateRecordsEqual(cooldownRecordsBefore, cooldownRecordsAfter)
-			if cooldownStateChanged || (observed && now.Sub(m.observationPersistedAt) >= quotaObservationPersistInterval) {
-				m.observationPersistedAt = now
+			if cooldownStateChanged || (observed && m.observationSaveDueLocked(now)) {
 				cooldownStateChanged = true
 			}
 		}

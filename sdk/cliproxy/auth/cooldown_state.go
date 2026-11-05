@@ -80,8 +80,8 @@ func (r *CooldownStateRecord) UnmarshalJSON(data []byte) error {
 // passes its model so Claude's 7d_oi becomes a scoped window. Devin keys go
 // through devinLegacySignals. Legacy data is Source headers, so the first poll
 // overrides it.
-func legacyQuotaObservation(kind ProviderKind, record CooldownStateRecord, now time.Time) (QuotaObservation, bool) {
-	if len(record.legacySignals) == 0 || record.legacyObservedAt.IsZero() || now.Sub(record.legacyObservedAt) > quotaObservationRetention {
+func legacyQuotaObservation(kind ProviderKind, record CooldownStateRecord) (QuotaObservation, bool) {
+	if len(record.legacySignals) == 0 || record.legacyObservedAt.IsZero() {
 		return QuotaObservation{}, false
 	}
 	headers := make(http.Header, len(record.legacySignals))
@@ -123,10 +123,6 @@ func legacyQuotaObservation(kind ProviderKind, record CooldownStateRecord, now t
 // management quota view keep their data across restarts instead of relearning
 // it from live traffic.
 const cooldownStateStatusObserved = "observed"
-
-// quotaObservationRetention bounds how long a saved observation stays useful.
-// The longest window it describes is weekly.
-const quotaObservationRetention = 8 * 24 * time.Hour
 
 // quotaObservationPersistInterval throttles observation saves: every upstream
 // response refreshes the observation, but disk writes happen at most this often.
