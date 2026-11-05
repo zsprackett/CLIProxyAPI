@@ -148,6 +148,11 @@ type Manager struct {
 	pendingCooldownStateStore CooldownStateStore
 	// observationPersistedAt throttles saving passive quota observations; guarded by mu.
 	observationPersistedAt time.Time
+	// observationSavePending is true while a trailing save of a throttled observation is
+	// scheduled; guarded by mu.
+	observationSavePending bool
+	// afterFunc schedules the trailing observation save; tests replace it.
+	afterFunc func(time.Duration, func())
 	// quotaPoll is the poll bookkeeping shared by the background loop and PollQuotaNow.
 	quotaPoll        quotaPollState
 	executors        map[string]ProviderExecutor

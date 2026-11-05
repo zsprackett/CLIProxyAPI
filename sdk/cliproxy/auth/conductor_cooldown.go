@@ -619,6 +619,39 @@ func (m *Manager) persistCooldownStatesToLocked(ctx context.Context, store Coold
 	return ctx.Err() == nil
 }
 
+// observationSaveDueLocked reports whether an observation made at now may be saved
+// immediately, and records the save when it may. Otherwise it schedules one trailing
+// save for when the interval since the last save ends, so the last observation of a
+// burst is not lost. At most one trailing save is pending. Caller holds m.mu.
+func (m *Manager) observationSaveDueLocked(now time.Time) bool {
+	if m.cooldownStore == nil {
+		return false
+	}
+	elapsed := max(now.Sub(m.observationPersistedAt), 0)
+	if elapsed >= quotaObservationPersistInterval {
+		m.observationPersistedAt = now
+		return true
+	}
+	if !m.observationSavePending {
+		m.observationSavePending = true
+		after := m.afterFunc
+		if after == nil {
+			after = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+		}
+		after(quotaObservationPersistInterval-elapsed, m.saveThrottledObservation)
+	}
+	return false
+}
+
+// saveThrottledObservation is the trailing save scheduled by observationSaveDueLocked.
+func (m *Manager) saveThrottledObservation() {
+	m.mu.Lock()
+	m.observationSavePending = false
+	m.observationPersistedAt = time.Now()
+	m.mu.Unlock()
+	m.persistCooldownStates(context.Background())
+}
+
 func (m *Manager) cooldownStateRecordsSnapshot() []CooldownStateRecord {
 	now := time.Now()
 	records := make([]CooldownStateRecord, 0)
@@ -1069,8 +1102,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		if trackCooldownState {
 			cooldownRecordsAfter := m.cooldownStateRecordsForAuthLocked(auth, now)
 			cooldownStateChanged = !cooldownStateRecordsEqual(cooldownRecordsBefore, cooldownRecordsAfter)
-			if cooldownStateChanged || (observed && now.Sub(m.observationPersistedAt) >= quotaObservationPersistInterval) {
-				m.observationPersistedAt = now
+			if cooldownStateChanged || (observed && m.observationSaveDueLocked(now)) {
 				cooldownStateChanged = true
 			}
 		}
