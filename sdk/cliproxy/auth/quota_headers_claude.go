@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -52,6 +53,9 @@ func claudeHeadersObservationScoped(h http.Header, scope string, now time.Time) 
 		}
 		if utilization, ok := parseQuotaFloat(rawUtilization); ok {
 			window.Used = KnownPercent(utilization * 100)
+		}
+		if strings.EqualFold(quotaHeaderValue(h, prefix+"Status"), "rejected") {
+			window.LimitReached = true
 		}
 		obs.Windows = append(obs.Windows, window)
 	}

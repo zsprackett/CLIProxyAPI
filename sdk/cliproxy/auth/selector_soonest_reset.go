@@ -13,7 +13,9 @@ const weeklyWindowMinutes = 7 * 24 * 60
 
 // SoonestResetSelector prefers the credential whose weekly (7-day) quota window resets
 // soonest, so quota that would otherwise expire unused at the reset is consumed first.
-// Once that credential is exhausted it enters cooldown and the next-soonest one is used.
+// A credential with an exhausted quota window that has not reset yet (for example a
+// spent 5-hour window) sorts behind every credential with room, because it cannot serve
+// the request. If every candidate is exhausted, the weekly reset alone decides.
 //
 // Reset times come from the credential's quota snapshot. A window scoped to the
 // requested model's family (Claude's Fable 7d_oi window) is preferred over the
@@ -33,12 +35,12 @@ func (s *SoonestResetSelector) Pick(ctx context.Context, provider, model string,
 	}
 	available = preferCodexWebsocketAuths(ctx, provider, available)
 	var picked *Auth
-	var pickedReset time.Time
+	var pickedRank soonestResetRank
 	for _, auth := range available {
-		resetAt := weeklyQuotaResetAt(auth, model, now)
-		if picked == nil || resetAt.Before(pickedReset) {
+		rank := rankSoonestReset(auth, model, now)
+		if picked == nil || rank.before(pickedRank) {
 			picked = auth
-			pickedReset = resetAt
+			pickedRank = rank
 		}
 	}
 	if picked == nil {
@@ -64,33 +66,80 @@ func weeklyResetRank(class WindowClass, scoped bool) int {
 	}
 }
 
-// weeklyQuotaResetAt returns the observed weekly quota reset time for auth serving model,
-// or the zero time when no future reset is known.
-func weeklyQuotaResetAt(auth *Auth, model string, now time.Time) time.Time {
+// soonestResetRank is the sort key of a credential under SoonestResetSelector.
+type soonestResetRank struct {
+	// gated is true when an applicable quota window is exhausted until a future reset.
+	gated       bool
+	weeklyReset time.Time
+}
+
+// before reports whether r sorts ahead of o: credentials with room first, then the
+// earlier weekly reset.
+func (r soonestResetRank) before(o soonestResetRank) bool {
+	if r.gated != o.gated {
+		return !r.gated
+	}
+	return r.weeklyReset.Before(o.weeklyReset)
+}
+
+// rankSoonestReset ranks auth serving model from its quota snapshot. weeklyReset is the
+// observed weekly reset, or the zero time when no future reset is known.
+func rankSoonestReset(auth *Auth, model string, now time.Time) soonestResetRank {
+	var rank soonestResetRank
 	if auth == nil {
-		return time.Time{}
+		return rank
 	}
 	provider := auth.QuotaSnapshot.Provider
 	scope := quotaScopeOf(provider, model)
-	bestRank := -1
-	var resetAt time.Time
+	var applicable []QuotaWindowObs
+	maxCodexUsed, codexUsedKnown := 0.0, false
 	for _, window := range auth.QuotaSnapshot.Windows {
-		if window.ModelScope != "" && window.ModelScope != scope {
+		class := window.Class(provider)
+		if class == "" || (window.ModelScope != "" && window.ModelScope != scope) {
 			continue
 		}
+		applicable = append(applicable, window)
+		if provider == ProviderCodex {
+			if used, ok := window.Used.Get(); ok && (!codexUsedKnown || used > maxCodexUsed) {
+				maxCodexUsed, codexUsedKnown = used, true
+			}
+		}
+	}
+	bestRank := -1
+	for _, window := range applicable {
 		if !window.ResetAt.After(now) {
 			continue
 		}
-		rank := weeklyResetRank(window.Class(provider), window.ModelScope != "")
-		if rank < 0 {
+		if windowExhausted(window, provider, maxCodexUsed, codexUsedKnown) {
+			rank.gated = true
+		}
+		windowRank := weeklyResetRank(window.Class(provider), window.ModelScope != "")
+		if windowRank < 0 {
 			continue
 		}
-		if bestRank < 0 || rank < bestRank {
-			bestRank = rank
-			resetAt = window.ResetAt
+		if bestRank < 0 || windowRank < bestRank {
+			bestRank = windowRank
+			rank.weeklyReset = window.ResetAt
 		}
 	}
-	return resetAt
+	return rank
+}
+
+// windowExhausted reports whether window has no room left. Codex sets one
+// limit-reached flag for the whole namespace, so on Codex the flag belongs to the
+// most-used window, and only that window counts as exhausted by it.
+func windowExhausted(window QuotaWindowObs, provider ProviderKind, maxCodexUsed float64, codexUsedKnown bool) bool {
+	used, usedKnown := window.Used.Get()
+	if usedKnown && used >= 100 {
+		return true
+	}
+	if !window.LimitReached {
+		return false
+	}
+	if provider != ProviderCodex || !codexUsedKnown {
+		return true
+	}
+	return usedKnown && used == maxCodexUsed
 }
 
 // parseQuotaResetAt resolves a reset time from an absolute unix timestamp or, failing
