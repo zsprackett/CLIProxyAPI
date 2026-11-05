@@ -24,7 +24,7 @@ func TestRollupTokenMapping(t *testing.T) {
 			provider: "claude",
 			detail: coreusage.Detail{
 				InputTokens: 100, CacheReadTokens: 5000, CacheCreationTokens: 3000,
-				CacheCreation1hTokens: 2000, OutputTokens: 400,
+				CacheCreation1hTokens: coreusage.Int64Ptr(2000), OutputTokens: 400,
 			},
 			want: Tokens{Uncached: 100, CacheRead: 5000, CacheWrite5m: 1000, CacheWrite1h: 2000, Output: 400},
 		},

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tidwall/gjson"
+	"github.com/MoeForge/moego/ojson"
 )
 
 // xaiBillingSummary is the active billing period of one Grok CLI billing payload.
@@ -44,7 +44,7 @@ func XAIBillingQuotaHeaders(weeklyBody, monthlyBody []byte, now time.Time) http.
 }
 
 func parseXAIBillingSummary(body []byte, now time.Time) (xaiBillingSummary, bool) {
-	config := gjson.GetBytes(body, "config")
+	config := ojson.GetBytes(body, "config")
 	if !config.IsObject() {
 		return xaiBillingSummary{}, false
 	}
@@ -100,18 +100,18 @@ func parseXAIBillingSummary(body []byte, now time.Time) (xaiBillingSummary, bool
 
 // xaiBillingCents reads a cent amount that is either a number, a numeric
 // string, or an object wrapping the amount in "val".
-func xaiBillingCents(value gjson.Result) (float64, bool) {
+func xaiBillingCents(value ojson.Result) (float64, bool) {
 	if value.IsObject() {
 		value = value.Get("val")
 	}
 	return quotaNumber(value)
 }
 
-func quotaNumber(value gjson.Result) (float64, bool) {
+func quotaNumber(value ojson.Result) (float64, bool) {
 	switch value.Type {
-	case gjson.Number:
+	case ojson.Number:
 		return value.Float(), true
-	case gjson.String:
+	case ojson.String:
 		parsed, errParse := strconv.ParseFloat(strings.TrimSpace(value.String()), 64)
 		return parsed, errParse == nil
 	default:
@@ -119,7 +119,7 @@ func quotaNumber(value gjson.Result) (float64, bool) {
 	}
 }
 
-func firstQuotaInstant(values ...gjson.Result) time.Time {
+func firstQuotaInstant(values ...ojson.Result) time.Time {
 	for _, value := range values {
 		if instant, ok := parseQuotaInstant(value); ok {
 			return instant
@@ -130,14 +130,14 @@ func firstQuotaInstant(values ...gjson.Result) time.Time {
 
 // parseQuotaInstant reads an RFC 3339 timestamp or a unix timestamp in seconds
 // or milliseconds.
-func parseQuotaInstant(value gjson.Result) (time.Time, bool) {
+func parseQuotaInstant(value ojson.Result) (time.Time, bool) {
 	if number, ok := quotaNumber(value); ok && number > 0 {
 		if number > 1e12 {
 			return time.UnixMilli(int64(number)), true
 		}
 		return time.Unix(int64(number), 0), true
 	}
-	if value.Type != gjson.String {
+	if value.Type != ojson.String {
 		return time.Time{}, false
 	}
 	parsed, errParse := time.Parse(time.RFC3339Nano, strings.TrimSpace(value.String()))

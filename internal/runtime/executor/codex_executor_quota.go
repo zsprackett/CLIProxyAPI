@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MoeForge/moego/ojson"
 	codexauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
 )
 
 const (
@@ -96,23 +96,23 @@ func codexQuotaCredential(auth *cliproxyauth.Auth) helps.CodexCredentialQuota {
 	)
 }
 
-func codexQuotaIDTokenClaims(raw string) gjson.Result {
+func codexQuotaIDTokenClaims(raw string) ojson.Result {
 	if strings.TrimSpace(raw) == "" {
-		return gjson.Result{}
+		return ojson.Result{}
 	}
 	claims, errParse := codexauth.ParseJWTToken(raw)
 	if errParse != nil {
-		return gjson.Result{}
+		return ojson.Result{}
 	}
 	return codexQuotaJSON(claims.CodexAuthInfo)
 }
 
-func codexQuotaJSON(value any) gjson.Result {
+func codexQuotaJSON(value any) ojson.Result {
 	raw, errMarshal := json.Marshal(value)
 	if errMarshal != nil {
-		return gjson.Result{}
+		return ojson.Result{}
 	}
-	return gjson.ParseBytes(raw)
+	return ojson.ParseBytes(raw)
 }
 
 func (e *CodexExecutor) fetchCodexQuotaJSON(ctx context.Context, auth *cliproxyauth.Auth, rawURL, accountID string, extra map[string]string) ([]byte, error) {

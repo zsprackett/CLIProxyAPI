@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	"github.com/tidwall/gjson"
 )
 
 // Claude Code sends "(external, cli, workload/cron)" on turns fired by a scheduled
@@ -86,8 +86,8 @@ func TestClaudeExecutor_WorkloadUserAgentKeepsNativePassthrough(t *testing.T) {
 				t.Fatalf("Execute() error = %v", errExecute)
 			}
 
-			toolName := gjson.GetBytes(seenBody, "tools.0.name").String()
-			billingText := gjson.GetBytes(seenBody, "system.0.text").String()
+			toolName := ojson.GetBytes(seenBody, "tools.0.name").String()
+			billingText := ojson.GetBytes(seenBody, "system.0.text").String()
 			if tt.native {
 				if seenUserAgent != tt.userAgent {
 					t.Errorf("upstream User-Agent = %q, want %q", seenUserAgent, tt.userAgent)

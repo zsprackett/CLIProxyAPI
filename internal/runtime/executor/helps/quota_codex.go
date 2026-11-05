@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MoeForge/moego/ojson"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	"github.com/tidwall/gjson"
 )
 
 // CodexQuotaSources holds the results of the three Codex poll requests. A nil
@@ -36,7 +36,7 @@ type CodexCredentialQuota struct {
 // CodexCredentialQuotaFrom reads the plan and the subscription end from the
 // stored credential sources, first match wins, as the management panel did:
 // the metadata, its id_token claims, the attributes, their id_token claims.
-func CodexCredentialQuotaFrom(sources ...gjson.Result) CodexCredentialQuota {
+func CodexCredentialQuotaFrom(sources ...ojson.Result) CodexCredentialQuota {
 	var credential CodexCredentialQuota
 	for _, source := range sources {
 		if credential.Plan == "" {
@@ -77,7 +77,7 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 		extras.Credits = cliproxyauth.FailedSection[cliproxyauth.CodexCredits](msg, now)
 	} else {
 		obs.Sections[cliproxyauth.SectionCodexUsage] = cliproxyauth.SectionOK
-		root := gjson.ParseBytes(src.Usage)
+		root := ojson.ParseBytes(src.Usage)
 		obs.Windows = codexUsageQuotaWindows(root, now)
 		rateLimit := firstCodexQuotaResult(root, "rate_limit", "rateLimit")
 		plan := strings.ToLower(strings.TrimSpace(firstCodexQuotaResultString(root, "plan_type", "planType")))
@@ -100,7 +100,7 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 			extras.Subscription.Value, extras.Subscription.ValueAt = &storedSubscription, now
 		}
 	case src.Subscription != nil:
-		activeUntil, ok := parseQuotaInstant(firstCodexQuotaResult(gjson.ParseBytes(src.Subscription), "active_until", "activeUntil"))
+		activeUntil, ok := parseQuotaInstant(firstCodexQuotaResult(ojson.ParseBytes(src.Subscription), "active_until", "activeUntil"))
 		if !ok {
 			activeUntil = src.Credential.ActiveUntil
 		}
@@ -121,7 +121,7 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 	case src.ResetCreditsErr != nil:
 		resetCreditsFailed(src.ResetCreditsErr.Error())
 	case src.ResetCredits != nil:
-		credits, ok := codexResetCredits(gjson.ParseBytes(src.ResetCredits))
+		credits, ok := codexResetCredits(ojson.ParseBytes(src.ResetCredits))
 		if ok {
 			extras.ResetCredits = cliproxyauth.OKSection(withCodexResetCreditCounts(credits, usageCounts), now)
 		} else {
@@ -134,7 +134,7 @@ func CodexQuotaObservation(src CodexQuotaSources, now time.Time) (cliproxyauth.Q
 
 // codexResetCreditCounts reads the two counts of a rate_limit_reset_credits
 // object, as found in the details payload and in /wham/usage.
-func codexResetCreditCounts(node gjson.Result) cliproxyauth.CodexResetCredits {
+func codexResetCreditCounts(node ojson.Result) cliproxyauth.CodexResetCredits {
 	return cliproxyauth.CodexResetCredits{
 		Available:           codexQuotaInt(firstCodexQuotaResult(node, "available_count", "availableCount")),
 		ApplicableAvailable: codexQuotaInt(firstCodexQuotaResult(node, "applicable_available_count", "applicableAvailableCount")),
@@ -164,7 +164,7 @@ func withCodexResetCreditCounts(credits, usage cliproxyauth.CodexResetCredits) c
 // codexUsageQuotaWindows reads the main, code-review, and additional rate
 // limits of /wham/usage. Window ids match the passive header parser, so a poll
 // and a response describe the same window.
-func codexUsageQuotaWindows(root gjson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
+func codexUsageQuotaWindows(root ojson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
 	var windows []cliproxyauth.QuotaWindowObs
 	windows = codexRateLimitWindows(windows, "", "", firstCodexQuotaResult(root, "rate_limit", "rateLimit"), now)
 	windows = codexRateLimitWindows(windows, "code_review.", "", firstCodexQuotaResult(root, "code_review_rate_limit", "codeReviewRateLimit"), now)
@@ -181,7 +181,7 @@ func codexUsageQuotaWindows(root gjson.Result, now time.Time) []cliproxyauth.Quo
 	return windows
 }
 
-func codexRateLimitWindows(windows []cliproxyauth.QuotaWindowObs, idPrefix, label string, rateLimit gjson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
+func codexRateLimitWindows(windows []cliproxyauth.QuotaWindowObs, idPrefix, label string, rateLimit ojson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
 	if !rateLimit.IsObject() {
 		return windows
 	}
@@ -224,7 +224,7 @@ func codexRateLimitWindows(windows []cliproxyauth.QuotaWindowObs, idPrefix, labe
 	return windows
 }
 
-func codexUsageCredits(node gjson.Result) cliproxyauth.CodexCredits {
+func codexUsageCredits(node ojson.Result) cliproxyauth.CodexCredits {
 	credits := cliproxyauth.CodexCredits{
 		HasCredits: codexQuotaBool(firstCodexQuotaResult(node, "has_credits", "hasCredits")),
 		Unlimited:  codexQuotaBool(node.Get("unlimited")),
@@ -241,7 +241,7 @@ var codexCreditBalancePattern = regexp.MustCompile(`^\d+(\.\d+)?$`)
 
 // codexResetCredits reads /wham/rate-limit-reset-credits. Only an available
 // codex_rate_limits credit with an expiry is listed, as in the management panel.
-func codexResetCredits(root gjson.Result) (cliproxyauth.CodexResetCredits, bool) {
+func codexResetCredits(root ojson.Result) (cliproxyauth.CodexResetCredits, bool) {
 	if !root.IsObject() {
 		return cliproxyauth.CodexResetCredits{}, false
 	}
@@ -278,9 +278,9 @@ func codexResetCredits(root gjson.Result) (cliproxyauth.CodexResetCredits, bool)
 	return out, true
 }
 
-func codexQuotaBool(value gjson.Result) *bool {
+func codexQuotaBool(value ojson.Result) *bool {
 	switch value.Type {
-	case gjson.True, gjson.False:
+	case ojson.True, ojson.False:
 		v := value.Bool()
 		return &v
 	default:
@@ -288,7 +288,7 @@ func codexQuotaBool(value gjson.Result) *bool {
 	}
 }
 
-func codexQuotaInt(value gjson.Result) *int {
+func codexQuotaInt(value ojson.Result) *int {
 	number, ok := quotaNumber(value)
 	if !ok {
 		return nil

@@ -3,7 +3,7 @@ package prompt
 import (
 	"strings"
 
-	"github.com/tidwall/gjson"
+	"github.com/MoeForge/moego/ojson"
 )
 
 // billingHeaderPrefix starts the per-request system block that CCH signing rewrites.
@@ -53,12 +53,12 @@ const billingHeaderPrefix = "x-anthropic-billing-header:"
 //   - ttl: TTL1h if any breakpoint has ttl "1h", else TTL5m if any breakpoint exists,
 //     else TTLNone.
 //
-// The walk uses gjson.ForEach over the raw body and never re-marshals. Raw member
+// The walk uses ojson.ForEach over the raw body and never re-marshals. Raw member
 // bytes are hashed as they appear, so any byte that changes on the wire changes
 // the hash (key order and whitespace included: if they change upstream, the
 // rendered prompt may change too, and a false "changed" beats a silent miss).
 func claudePrint(body []byte) *Print {
-	root := gjson.ParseBytes(body)
+	root := ojson.ParseBytes(body)
 	if !root.IsObject() {
 		return nil
 	}
@@ -75,7 +75,7 @@ func claudePrint(body []byte) *Print {
 	if tools := root.Get("tools"); tools.IsArray() {
 		h.reset()
 		count := 0
-		tools.ForEach(func(_, tool gjson.Result) bool {
+		tools.ForEach(func(_, tool ojson.Result) bool {
 			count++
 			note(h.writeMembers(tool))
 			h.sep()
@@ -88,11 +88,11 @@ func claudePrint(body []byte) *Print {
 
 	system := root.Get("system")
 	switch {
-	case system.Type == gjson.String:
+	case system.Type == ojson.String:
 		p.hashes = append(p.hashes, h.hashString(system.Str))
 		p.layout.system = 1
 	case system.IsArray():
-		system.ForEach(func(_, block gjson.Result) bool {
+		system.ForEach(func(_, block ojson.Result) bool {
 			h.reset()
 			note(h.writeMembers(block))
 			if isBillingHeaderBlock(block.Get("text").Str) {
@@ -114,11 +114,11 @@ func claudePrint(body []byte) *Print {
 	p.layout.settings = 1
 
 	blocks := 0
-	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
+	root.Get("messages").ForEach(func(_, msg ojson.Result) bool {
 		role := msg.Get("role").Raw
 		start := len(p.hashes)
 		p.msgStarts = append(p.msgStarts, uint32(p.layout.items))
-		blockHash := func(raw string, members gjson.Result) {
+		blockHash := func(raw string, members ojson.Result) {
 			h.reset()
 			h.write(role)
 			h.sep()
@@ -136,18 +136,18 @@ func claudePrint(body []byte) *Print {
 		}
 		content := msg.Get("content")
 		switch {
-		case content.Type == gjson.String:
-			blockHash(content.Raw, gjson.Result{})
+		case content.Type == ojson.String:
+			blockHash(content.Raw, ojson.Result{})
 			blocks++
 		case content.IsArray():
-			content.ForEach(func(_, block gjson.Result) bool {
+			content.ForEach(func(_, block ojson.Result) bool {
 				blockHash("", block)
 				blocks++
 				return true
 			})
 		}
 		if len(p.hashes) == start {
-			blockHash("", gjson.Result{})
+			blockHash("", ojson.Result{})
 		}
 		return true
 	})
