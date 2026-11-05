@@ -276,7 +276,7 @@ func EnsureTokenBreakdownForProvider(detail Detail, provider, executorType strin
 			(semantics == tokenAccountingSemanticsSubset || semantics == tokenAccountingSemanticsSeparateReasoning) {
 			detail.CacheReadTokens = detail.CachedTokens
 		}
-		detail.TokenBreakdown = tokenBreakdownForSemantics(detail, semantics).WithCacheWrite1h(detail.CacheCreation1hTokens)
+		detail.TokenBreakdown = tokenBreakdownForSemantics(detail, semantics).WithCacheWrite1h(detail.CacheWrite1h())
 	}
 	if detail.TotalTokens == 0 {
 		detail.TotalTokens = detail.TokenBreakdown.TotalTokens

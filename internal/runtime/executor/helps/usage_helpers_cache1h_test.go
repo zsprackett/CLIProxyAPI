@@ -5,8 +5,8 @@ import "testing"
 func TestParseClaudeUsageSplitsOneHourCacheWrites(t *testing.T) {
 	data := []byte(`{"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":20,"cache_creation_input_tokens":1000,"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":900}}}`)
 	detail := ParseClaudeUsage(data)
-	if detail.CacheCreationTokens != 1000 || detail.CacheCreation1hTokens != 900 {
-		t.Fatalf("detail cache creation = %d (1h %d), want 1000 (1h 900)", detail.CacheCreationTokens, detail.CacheCreation1hTokens)
+	if detail.CacheCreationTokens != 1000 || detail.CacheWrite1h() != 900 {
+		t.Fatalf("detail cache creation = %d (1h %d), want 1000 (1h 900)", detail.CacheCreationTokens, detail.CacheWrite1h())
 	}
 	breakdown := detail.TokenBreakdown
 	if !breakdown.Valid() || breakdown.Input.CacheWriteTokens != 1000 || breakdown.Input.CacheWrite1hTokens != 900 {
@@ -20,8 +20,8 @@ func TestParseClaudeUsageSplitsOneHourCacheWrites(t *testing.T) {
 func TestParseClaudeUsageWithoutCacheCreationObjectHasNoOneHourWrites(t *testing.T) {
 	data := []byte(`{"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":1000}}`)
 	detail := ParseClaudeUsage(data)
-	if detail.CacheCreation1hTokens != 0 || detail.TokenBreakdown.Input.CacheWrite1hTokens != 0 {
-		t.Fatalf("1h writes = %d / %d, want 0", detail.CacheCreation1hTokens, detail.TokenBreakdown.Input.CacheWrite1hTokens)
+	if detail.CacheWrite1h() != 0 || detail.TokenBreakdown.Input.CacheWrite1hTokens != 0 {
+		t.Fatalf("1h writes = %d / %d, want 0", detail.CacheWrite1h(), detail.TokenBreakdown.Input.CacheWrite1hTokens)
 	}
 	if !detail.TokenBreakdown.Valid() || detail.TokenBreakdown.Input.CacheWriteTokens != 1000 {
 		t.Fatalf("token breakdown = %+v", detail.TokenBreakdown)
@@ -31,8 +31,8 @@ func TestParseClaudeUsageWithoutCacheCreationObjectHasNoOneHourWrites(t *testing
 func TestParseClaudeUsageUsesCacheCreationObjectWhenTotalIsMissing(t *testing.T) {
 	data := []byte(`{"usage":{"input_tokens":10,"output_tokens":5,"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":900}}}`)
 	detail := ParseClaudeUsage(data)
-	if detail.CacheCreationTokens != 1000 || detail.CacheCreation1hTokens != 900 {
-		t.Fatalf("detail cache creation = %d (1h %d), want 1000 (1h 900)", detail.CacheCreationTokens, detail.CacheCreation1hTokens)
+	if detail.CacheCreationTokens != 1000 || detail.CacheWrite1h() != 900 {
+		t.Fatalf("detail cache creation = %d (1h %d), want 1000 (1h 900)", detail.CacheCreationTokens, detail.CacheWrite1h())
 	}
 	if !detail.TokenBreakdown.Valid() || detail.TokenBreakdown.Input.CacheWrite1hTokens != 900 || detail.TotalTokens != 1015 {
 		t.Fatalf("detail = %+v", detail)
@@ -59,8 +59,8 @@ func TestStreamUsageBufferObserveClaudeStreamKeepsOneHourWritesFromMessageStart(
 	if !ok {
 		t.Fatal("expected buffer to contain usage detail")
 	}
-	if detail.CacheCreationTokens != 1000 || detail.CacheCreation1hTokens != 900 {
-		t.Fatalf("detail cache creation = %d (1h %d), want 1000 (1h 900)", detail.CacheCreationTokens, detail.CacheCreation1hTokens)
+	if detail.CacheCreationTokens != 1000 || detail.CacheWrite1h() != 900 {
+		t.Fatalf("detail cache creation = %d (1h %d), want 1000 (1h 900)", detail.CacheCreationTokens, detail.CacheWrite1h())
 	}
 	breakdown := detail.TokenBreakdown
 	if !breakdown.Valid() || breakdown.Input.CacheWriteTokens != 1000 || breakdown.Input.CacheWrite1hTokens != 900 {

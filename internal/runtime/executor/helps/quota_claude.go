@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MoeForge/moego/ojson"
 	claudeauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/claude"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	"github.com/tidwall/gjson"
 )
 
 // claudePollFableScope is the window scope of the Fable weekly limit.
@@ -56,7 +56,7 @@ func ClaudeQuotaObservation(src ClaudeQuotaSources, now time.Time) (cliproxyauth
 		extras.ExtraUsage = cliproxyauth.FailedSection[cliproxyauth.ClaudeExtraUsage](src.UsageErr.Error(), now)
 	} else {
 		obs.Sections[cliproxyauth.SectionClaudeUsage] = cliproxyauth.SectionOK
-		root := gjson.ParseBytes(src.Usage)
+		root := ojson.ParseBytes(src.Usage)
 		obs.Windows = claudeUsageQuotaWindows(root, now)
 		extras.ExtraUsage = cliproxyauth.OKSection(claudeExtraUsage(root.Get("extra_usage")), now)
 	}
@@ -69,7 +69,7 @@ func ClaudeQuotaObservation(src ClaudeQuotaSources, now time.Time) (cliproxyauth
 	return obs, src.UsageErr
 }
 
-func claudeUsageQuotaWindows(root gjson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
+func claudeUsageQuotaWindows(root ojson.Result, now time.Time) []cliproxyauth.QuotaWindowObs {
 	windows := make([]cliproxyauth.QuotaWindowObs, 0, len(claudeUsageWindows))
 	fable, hasFable := claudeFableLimit(root.Get("limits"))
 	for _, spec := range claudeUsageWindows {
@@ -101,11 +101,11 @@ func claudeUsageQuotaWindows(root gjson.Result, now time.Time) []cliproxyauth.Qu
 
 // claudeFableLimit finds the Fable weekly_scoped entry of limits[]. The active
 // one wins; otherwise the first.
-func claudeFableLimit(limits gjson.Result) (gjson.Result, bool) {
+func claudeFableLimit(limits ojson.Result) (ojson.Result, bool) {
 	if !limits.IsArray() {
-		return gjson.Result{}, false
+		return ojson.Result{}, false
 	}
-	var first gjson.Result
+	var first ojson.Result
 	found := false
 	for _, limit := range limits.Array() {
 		if !strings.EqualFold(strings.TrimSpace(limit.Get("kind").String()), "weekly_scoped") {
@@ -128,7 +128,7 @@ func claudeFableLimit(limits gjson.Result) (gjson.Result, bool) {
 	return first, found
 }
 
-func claudeExtraUsage(node gjson.Result) cliproxyauth.ClaudeExtraUsage {
+func claudeExtraUsage(node ojson.Result) cliproxyauth.ClaudeExtraUsage {
 	usage := cliproxyauth.ClaudeExtraUsage{
 		Enabled:      node.Get("is_enabled").Bool(),
 		MonthlyLimit: node.Get("monthly_limit").Float(),

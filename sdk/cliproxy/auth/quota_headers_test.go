@@ -524,3 +524,37 @@ func TestClaudeHeadersObservation_RejectedStatusMarksLimitReached(t *testing.T) 
 		}
 	}
 }
+
+// Upstream issue #6465: a rejected overage claim carries the monthly billing
+// boundary in the unified and overage reset headers. The snapshot reads only
+// the per-window headers, so that boundary never becomes a window reset and
+// the shared windows are not marked exhausted.
+func TestClaudeHeadersIgnoreOverageBillingReset(t *testing.T) {
+	now := time.Date(2026, 10, 7, 20, 46, 4, 0, time.UTC)
+	billing := time.Unix(1793491200, 0)
+	headers := http.Header{
+		"Anthropic-Ratelimit-Unified-Status":               []string{"rejected"},
+		"Anthropic-Ratelimit-Unified-Representative-Claim": []string{"overage"},
+		"Anthropic-Ratelimit-Unified-Reset":                []string{"1793491200"},
+		"Anthropic-Ratelimit-Unified-Overage-Status":       []string{"rejected"},
+		"Anthropic-Ratelimit-Unified-Overage-Reset":        []string{"1793491200"},
+		"Anthropic-Ratelimit-Unified-5h-Utilization":       []string{"0.12"},
+		"Anthropic-Ratelimit-Unified-5h-Reset":             []string{strconv.FormatInt(now.Add(3*time.Hour).Unix(), 10)},
+		"Anthropic-Ratelimit-Unified-7d-Utilization":       []string{"0.4"},
+		"Anthropic-Ratelimit-Unified-7d-Reset":             []string{strconv.FormatInt(now.Add(72*time.Hour).Unix(), 10)},
+	}
+
+	var snapshot QuotaSnapshot
+	snapshot.ObserveResponseHeaders("claude", "claude-opus-5-5", headers, now)
+	for _, w := range snapshot.Windows {
+		if w.LimitReached {
+			t.Fatalf("window %q marked exhausted by a rejected overage claim", w.ID)
+		}
+		if w.ResetAt.Equal(billing) {
+			t.Fatalf("window %q took the overage billing reset %v", w.ID, billing)
+		}
+	}
+	if got := headersTestWindowIDs(snapshot); !reflect.DeepEqual(got, []WindowID{"five_hour", "seven_day"}) {
+		t.Fatalf("windows = %v, want five_hour and seven_day only", got)
+	}
+}

@@ -92,7 +92,7 @@ func TestEnsureTokenBreakdownForProviderCarriesCacheWrite1h(t *testing.T) {
 		InputTokens:           10,
 		CacheReadTokens:       20,
 		CacheCreationTokens:   1000,
-		CacheCreation1hTokens: 900,
+		CacheCreation1hTokens: Int64Ptr(900),
 		OutputTokens:          5,
 	}, "claude", "claude")
 	if !detail.TokenBreakdown.Valid() {

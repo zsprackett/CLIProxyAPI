@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tidwall/gjson"
+	"github.com/MoeForge/moego/ojson"
 )
 
 // Format names the upstream wire protocol a body was written in. Only formats
@@ -470,8 +470,8 @@ func (h *hasher) hashString(s string) uint64 {
 // writeMembers hashes every member of obj except cache_control as key, value
 // raw bytes in body order. It reports whether a cache_control marker was found
 // and whether that marker asked for the 1h TTL.
-func (h *hasher) writeMembers(obj gjson.Result) (breakpoint bool, ttl1h bool) {
-	obj.ForEach(func(k, v gjson.Result) bool {
+func (h *hasher) writeMembers(obj ojson.Result) (breakpoint bool, ttl1h bool) {
+	obj.ForEach(func(k, v ojson.Result) bool {
 		if k.Str == "cache_control" {
 			breakpoint = true
 			if v.Get("ttl").Str == "1h" {
