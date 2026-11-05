@@ -101,17 +101,33 @@ func TestQuotaObservationSharesRecordWithCooldown(t *testing.T) {
 	}
 }
 
-func TestStaleQuotaObservationIsNotPersisted(t *testing.T) {
+func TestOldQuotaObservationIsSavedAndRestored(t *testing.T) {
+	ctx := context.Background()
 	store := NewFileCooldownStateStore(t.TempDir())
-	m := newObservationPersistManager(t, store, "claude-c.json")
-	m.mu.Lock()
-	m.auths["claude-c.json"].QuotaSnapshot.ObserveResponseHeaders("claude", "", http.Header{
-		"Anthropic-Ratelimit-Unified-7d-Utilization": []string{"0.5"},
-	}, time.Now().Add(-quotaObservationRetention-time.Hour))
-	m.mu.Unlock()
+	observedAt := time.Now().Add(-9*24*time.Hour - time.Hour)
 
-	if records := m.cooldownStateRecordsSnapshot(); len(records) != 0 {
-		t.Fatalf("stale observation was persisted: %+v", records)
+	first := newObservationPersistManager(t, store, "claude-c.json")
+	first.mu.Lock()
+	first.auths["claude-c.json"].QuotaSnapshot.ObserveResponseHeaders("claude", "", http.Header{
+		"Anthropic-Ratelimit-Unified-7d-Utilization": []string{"0.5"},
+	}, observedAt)
+	first.mu.Unlock()
+	if records := first.cooldownStateRecordsSnapshot(); len(records) != 1 {
+		t.Fatalf("old observation was not saved: %+v", records)
+	}
+	first.persistCooldownStates(ctx)
+
+	second := newObservationPersistManager(t, store, "claude-c.json")
+	if err := second.RestoreCooldownStates(ctx); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	restored, _ := second.GetByID("claude-c.json")
+	windows := restored.QuotaSnapshot.Windows
+	if len(windows) != 1 || windows[0].ID != "seven_day" {
+		t.Fatalf("old observation not restored: %+v", restored.QuotaSnapshot)
+	}
+	if used, known := windows[0].Used.Get(); !known || used != 50 {
+		t.Fatalf("restored 7d used = %v (known %t), want 50", used, known)
 	}
 }
 
