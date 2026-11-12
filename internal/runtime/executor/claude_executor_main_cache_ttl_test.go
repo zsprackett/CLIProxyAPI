@@ -51,7 +51,7 @@ func TestClaudeExecutor_MainCacheTTL1hUpgradesNativeMainConversation(t *testing.
 			defer server.Close()
 
 			incoming := http.Header{
-				"User-Agent":               {"claude-cli/2.1.280 (external, cli)"},
+				"User-Agent":               {"claude-cli/2.1.321 (external, cli)"},
 				"X-App":                    {"cli"},
 				"Anthropic-Beta":           {"claude-code-20250219"},
 				"X-Claude-Code-Session-Id": {"11111111-2222-4333-8444-555555555555"},
