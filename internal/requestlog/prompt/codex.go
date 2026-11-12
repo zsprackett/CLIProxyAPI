@@ -1,6 +1,6 @@
 package prompt
 
-import "github.com/tidwall/gjson"
+import "github.com/MoeForge/moego/ojson"
 
 // codexPrint fingerprints an OpenAI Responses body (Codex HTTP and websocket).
 //
@@ -16,7 +16,7 @@ import "github.com/tidwall/gjson"
 //
 // The "type":"response.create" field that buildCodexWebsocketRequestBody adds is a
 // top-level field and is not part of any segment, so hashing either the websocket
-// frame or the body before that one sjson.Set gives identical segment hashes.
+// frame or the body before that one ojson.Set gives identical segment hashes.
 //
 // Section order: tools -> instructions -> input.
 //
@@ -31,7 +31,7 @@ import "github.com/tidwall/gjson"
 //   - ttl: TTLUnknown (OpenAI does not let the caller set it here; the executors
 //     delete prompt_cache_retention).
 func codexPrint(body []byte) *Print {
-	root := gjson.ParseBytes(body)
+	root := ojson.ParseBytes(body)
 	if !root.IsObject() {
 		return nil
 	}
@@ -40,7 +40,7 @@ func codexPrint(body []byte) *Print {
 
 	if tools := root.Get("tools"); tools.IsArray() {
 		count := 0
-		tools.ForEach(func(_, _ gjson.Result) bool {
+		tools.ForEach(func(_, _ ojson.Result) bool {
 			count++
 			return true
 		})
@@ -54,21 +54,21 @@ func codexPrint(body []byte) *Print {
 
 	input := root.Get("input")
 	switch {
-	case input.Type == gjson.String:
+	case input.Type == ojson.String:
 		p.hashes = append(p.hashes, h.hashString(input.Raw))
 		p.layout.items = 1
 	case input.IsArray():
-		input.ForEach(func(_, item gjson.Result) bool {
+		input.ForEach(func(_, item ojson.Result) bool {
 			p.hashes = append(p.hashes, h.hashString(item.Raw))
 			p.layout.items++
 			return true
 		})
 	}
 
-	if key := root.Get("prompt_cache_key"); key.Type == gjson.String && key.Str != "" {
+	if key := root.Get("prompt_cache_key"); key.Type == ojson.String && key.Str != "" {
 		p.cacheKey = h.hashString(key.Str)
 	}
-	if prev := root.Get("previous_response_id"); prev.Type == gjson.String && prev.Str != "" {
+	if prev := root.Get("previous_response_id"); prev.Type == ojson.String && prev.Str != "" {
 		p.incremental = true
 	}
 	p.fold()

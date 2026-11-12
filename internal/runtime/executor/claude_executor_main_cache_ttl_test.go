@@ -8,12 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	"github.com/tidwall/gjson"
 )
 
 func TestClaudeExecutor_MainCacheTTL1hUpgradesNativeMainConversation(t *testing.T) {
@@ -51,7 +51,7 @@ func TestClaudeExecutor_MainCacheTTL1hUpgradesNativeMainConversation(t *testing.
 			defer server.Close()
 
 			incoming := http.Header{
-				"User-Agent":               {"claude-cli/2.1.280 (external, cli)"},
+				"User-Agent":               {"claude-cli/2.1.321 (external, cli)"},
 				"X-App":                    {"cli"},
 				"Anthropic-Beta":           {"claude-code-20250219"},
 				"X-Claude-Code-Session-Id": {"11111111-2222-4333-8444-555555555555"},
@@ -97,7 +97,7 @@ func TestClaudeExecutor_MainCacheTTL1hUpgradesNativeMainConversation(t *testing.
 			}
 
 			markers := 0
-			forEachClaudeCacheControlBlock(seenBody, func(path string, block gjson.Result) {
+			forEachClaudeCacheControlBlock(seenBody, func(path string, block ojson.Result) {
 				cacheControl := block.Get("cache_control")
 				if !cacheControl.IsObject() {
 					return

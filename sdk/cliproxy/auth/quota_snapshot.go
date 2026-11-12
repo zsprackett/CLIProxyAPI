@@ -608,6 +608,16 @@ func (s QuotaSnapshot) Clone() QuotaSnapshot {
 	return out
 }
 
+// Window returns the credential-wide window with the given ID.
+func (s QuotaSnapshot) Window(id WindowID) (QuotaWindowObs, bool) {
+	for _, w := range s.Windows {
+		if w.ID == id && w.ModelScope == "" {
+			return w, true
+		}
+	}
+	return QuotaWindowObs{}, false
+}
+
 // Observe applies one observation. It is the only public writer of the snapshot.
 func (s *QuotaSnapshot) Observe(obs QuotaObservation) bool {
 	return s.apply(obs)

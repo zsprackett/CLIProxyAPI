@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/ojson"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestlog/prompt"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
-	"github.com/tidwall/gjson"
 )
 
 // forwarder delivers the records of one test session from the global usage
@@ -76,7 +76,7 @@ func TestEndToEndClaudeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := gjson.ParseBytes(raw)
+	page := ojson.ParseBytes(raw)
 	if !page.Get("enabled").Bool() || page.Get("entries.#").Int() != 3 {
 		t.Fatalf("page = %s", raw)
 	}
@@ -108,7 +108,7 @@ func TestEndToEndClaudeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess := gjson.GetBytes(sessions, `sessions.#(session_id=="`+sessionID+`")`)
+	sess := ojson.GetBytes(sessions, `sessions.#(session_id=="`+sessionID+`")`)
 	if sess.Get("requests").Int() != 3 || sess.Get("verdicts.hit").Int() != 1 || sess.Get("top_cause").String() != "tools_changed" || sess.Get("last_miss.seq").Int() != 3 {
 		t.Fatalf("session = %s", sess.Raw)
 	}

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	"github.com/tidwall/gjson"
 )
 
 // classifierPayload mirrors the auto-mode classifier request that Claude Code
@@ -68,9 +68,9 @@ func TestClaudeExecutor_CloakedClassifierKeepsItsSystemPrompt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			body := sendClassifierRequest(t, stream, classifierPayload(classifierSystemPrompt))
 
-			system := gjson.GetBytes(body, "system").Array()
+			system := ojson.GetBytes(body, "system").Array()
 			if len(system) != 3 {
-				t.Fatalf("system has %d blocks, want billing + classifier prompt + session context; system=%s", len(system), gjson.GetBytes(body, "system").Raw)
+				t.Fatalf("system has %d blocks, want billing + classifier prompt + session context; system=%s", len(system), ojson.GetBytes(body, "system").Raw)
 			}
 			if got := system[0].Get("text").String(); !strings.HasPrefix(got, "x-anthropic-billing-header:") || !strings.Contains(got, "cc_entrypoint=cli;") {
 				t.Fatalf("system[0] = %q, want the cloaked CLI billing header", got)
@@ -85,9 +85,9 @@ func TestClaudeExecutor_CloakedClassifierKeepsItsSystemPrompt(t *testing.T) {
 				t.Fatalf("system[2] = %q, want the session context", got)
 			}
 
-			messages := gjson.GetBytes(body, "messages").Array()
+			messages := ojson.GetBytes(body, "messages").Array()
 			if len(messages) != 2 {
-				t.Fatalf("messages has %d turns, want the caller's 2 user turns; messages=%s", len(messages), gjson.GetBytes(body, "messages").Raw)
+				t.Fatalf("messages has %d turns, want the caller's 2 user turns; messages=%s", len(messages), ojson.GetBytes(body, "messages").Raw)
 			}
 			if got := messages[0].Get("content").Raw; got != `[{"type":"text","text":"CLAUDE.md contents","cache_control":{"type":"ephemeral","ttl":"1h"}}]` {
 				t.Fatalf("messages.0.content = %s, want the caller's cached CLAUDE.md turn unchanged", got)
@@ -100,14 +100,15 @@ func TestClaudeExecutor_CloakedClassifierKeepsItsSystemPrompt(t *testing.T) {
 }
 
 // A caller system prompt that is not the classifier still gets the CLI
-// identity block and the mid-conversation system turn.
-func TestClaudeExecutor_CloakedNonClassifierStillRelocatesSystemPrompt(t *testing.T) {
+// identity block. With only user turns, the cloak keeps the caller prompt at
+// the top level after the identity block.
+func TestClaudeExecutor_CloakedNonClassifierStillGetsIdentityBlock(t *testing.T) {
 	body := sendClassifierRequest(t, false, classifierPayload("You are a helpful reviewer."))
 
-	if got := gjson.GetBytes(body, "system.1.text").String(); got != claudeCodeCLIIdentity {
+	if got := ojson.GetBytes(body, "system.1.text").String(); got != claudeCodeCLIIdentity {
 		t.Fatalf("system.1 = %q, want the CLI identity block", got)
 	}
-	if got := gjson.GetBytes(body, `messages.#(role=="system").content.0.text`).String(); got != "You are a helpful reviewer." {
-		t.Fatalf("role=system turn text = %q, want the caller prompt relocated; messages=%s", got, gjson.GetBytes(body, "messages").Raw)
+	if got := ojson.GetBytes(body, "system.2.text").String(); got != "You are a helpful reviewer." {
+		t.Fatalf("system.2 = %q, want the caller prompt after the identity block; system=%s", got, ojson.GetBytes(body, "system").Raw)
 	}
 }

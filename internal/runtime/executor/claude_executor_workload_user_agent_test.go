@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	"github.com/tidwall/gjson"
 )
 
 // Claude Code sends "(external, cli, workload/cron)" on turns fired by a scheduled
@@ -34,20 +34,20 @@ func TestClaudeExecutor_WorkloadUserAgentKeepsNativePassthrough(t *testing.T) {
 	}{
 		{
 			name:      "interactive turn",
-			userAgent: "claude-cli/2.1.302 (external, cli)",
-			billing:   "x-anthropic-billing-header: cc_version=2.1.302.258; cc_entrypoint=cli;",
+			userAgent: "claude-cli/2.1.321 (external, cli)",
+			billing:   "x-anthropic-billing-header: cc_version=2.1.321.258; cc_entrypoint=cli;",
 			native:    true,
 		},
 		{
 			name:      "cron turn",
-			userAgent: "claude-cli/2.1.302 (external, cli, workload/cron)",
-			billing:   "x-anthropic-billing-header: cc_version=2.1.302.258; cc_entrypoint=cli; cc_workload=cron;",
+			userAgent: "claude-cli/2.1.321 (external, cli, workload/cron)",
+			billing:   "x-anthropic-billing-header: cc_version=2.1.321.258; cc_entrypoint=cli; cc_workload=cron;",
 			native:    true,
 		},
 		{
-			name:      "unknown suffix",
-			userAgent: "claude-cli/2.1.302 (external, cli, foo/bar)",
-			billing:   "x-anthropic-billing-header: cc_version=2.1.302.258; cc_entrypoint=cli;",
+			name:      "malformed suffix",
+			userAgent: "claude-cli/2.1.321 (external, cli, foo)",
+			billing:   "x-anthropic-billing-header: cc_version=2.1.321.258; cc_entrypoint=cli;",
 			native:    false,
 		},
 	}
@@ -86,8 +86,8 @@ func TestClaudeExecutor_WorkloadUserAgentKeepsNativePassthrough(t *testing.T) {
 				t.Fatalf("Execute() error = %v", errExecute)
 			}
 
-			toolName := gjson.GetBytes(seenBody, "tools.0.name").String()
-			billingText := gjson.GetBytes(seenBody, "system.0.text").String()
+			toolName := ojson.GetBytes(seenBody, "tools.0.name").String()
+			billingText := ojson.GetBytes(seenBody, "system.0.text").String()
 			if tt.native {
 				if seenUserAgent != tt.userAgent {
 					t.Errorf("upstream User-Agent = %q, want %q", seenUserAgent, tt.userAgent)
@@ -100,8 +100,8 @@ func TestClaudeExecutor_WorkloadUserAgentKeepsNativePassthrough(t *testing.T) {
 				}
 				return
 			}
-			if seenUserAgent != "claude-cli/2.1.280 (external, cli)" {
-				t.Errorf("upstream User-Agent = %q, want the cloaked %q", seenUserAgent, "claude-cli/2.1.280 (external, cli)")
+			if seenUserAgent != "claude-cli/2.1.321 (external, cli)" {
+				t.Errorf("upstream User-Agent = %q, want the cloaked %q", seenUserAgent, "claude-cli/2.1.321 (external, cli)")
 			}
 			if !strings.HasPrefix(toolName, "mcp__") || !strings.HasSuffix(toolName, "_Agent") {
 				t.Errorf("upstream tool name = %q, want a cloaked mcp__..._Agent alias", toolName)
