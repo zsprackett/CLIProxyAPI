@@ -427,6 +427,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 			auth.cooldownRecordedSeq = existing.cooldownRecordedSeq
 			auth.forceCooldownUntil = existing.forceCooldownUntil
 			auth.credQuotaForceUntil = existing.credQuotaForceUntil
+			auth.credentialRetryAfter = existing.credentialRetryAfter
 			auth.forceCooldownSeeded = existing.forceCooldownSeeded
 		}
 		incoming := auth.QuotaSnapshot
@@ -459,6 +460,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 					auth.NextRetryAfter = time.Time{}
 					auth.cooldownRecordedSeq = 0
 					auth.forceCooldownUntil = time.Time{}
+					auth.credentialRetryAfter = time.Time{}
 					auth.LastError = nil
 					auth.StatusMessage = ""
 					auth.Status = StatusActive
@@ -516,6 +518,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 			auth.cooldownRecordedSeq = existing.cooldownRecordedSeq
 			auth.forceCooldownUntil = existing.forceCooldownUntil
 			auth.credQuotaForceUntil = existing.credQuotaForceUntil
+			auth.credentialRetryAfter = existing.credentialRetryAfter
 			auth.forceCooldownSeeded = existing.forceCooldownSeeded
 			if auth.Status == StatusActive {
 				auth.Status = existing.Status
@@ -526,6 +529,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 			auth.cooldownRecordedSeq = existing.cooldownRecordedSeq
 			auth.forceCooldownUntil = existing.forceCooldownUntil
 			auth.credQuotaForceUntil = existing.credQuotaForceUntil
+			auth.credentialRetryAfter = existing.credentialRetryAfter
 			auth.forceCooldownSeeded = existing.forceCooldownSeeded
 			if auth.LastError == nil && existing.LastError != nil {
 				auth.LastError = cloneError(existing.LastError)
