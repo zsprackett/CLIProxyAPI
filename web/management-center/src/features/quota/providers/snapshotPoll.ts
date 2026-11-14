@@ -11,7 +11,7 @@ import { createStatusError, isClaudeFile, isCodexFile, isDisabledAuthFile } from
 import { pollCredentialQuota } from '../snapshot/api';
 import type { QuotaSnapshot } from '../snapshot/types';
 import { fileAuthIndex } from '../snapshot/windows';
-import { consumeCodexResetCredit } from './codex/resetCredit';
+import { redeemCodexResetCredit } from './codex/resetCredit';
 import type { QuotaProviderData } from './types';
 
 type SnapshotPollConfig = QuotaProviderData<SnapshotPollState, QuotaSnapshot>;
@@ -70,7 +70,7 @@ const pollCodexQuota = pollQuota('codex_quota');
 export const CODEX_CONFIG: SnapshotPollConfig = {
   ...snapshotPollConfig('codex', (file) => isCodexFile(file) && !isDisabledAuthFile(file)),
   resetQuota: async (file, t) => {
-    await consumeCodexResetCredit(file, t);
+    await redeemCodexResetCredit(file, t);
     return pollCodexQuota(file, t);
   },
   canResetQuota: (snapshot) =>

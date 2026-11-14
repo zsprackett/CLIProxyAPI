@@ -46,8 +46,8 @@ describe('quota card for a snapshot provider', () => {
       auth_index: 'idx-a',
       quota_snapshot: claudeGolden,
     });
-    expect(markup).toContain('<span class="codexPlanValue">Max</span>');
-    expect(markup).toContain('7-day limit');
+    expect(markup).toContain('<span class="premiumPlanValue">Max</span>');
+    expect(markup).toContain('Weekly limit');
     expect(markup).toContain('Refresh');
     expect(markup).not.toContain('idleBody');
   });
@@ -55,7 +55,7 @@ describe('quota card for a snapshot provider', () => {
   test('a card without a snapshot offers Load quota', () => {
     const markup = renderCard({ name: 'claude-b.json', type: 'claude', auth_index: 'idx-b' });
     expect(markup).toContain('idleBody');
-    expect(markup).not.toContain('7-day limit');
+    expect(markup).not.toContain('Weekly limit');
   });
 
   test('a failed click shows the error', () => {
@@ -75,6 +75,6 @@ describe('quota card for a snapshot provider', () => {
       quota_snapshot: codexSnapshot(),
     });
     expect(markup).toContain('Reset quota');
-    expect(markup).toContain('Pro 20x');
+    expect(markup).toContain('Pro 200');
   });
 });

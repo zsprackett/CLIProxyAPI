@@ -13,7 +13,7 @@ go run ./cmd/server # Run dev server
 go test ./... # Run all tests
 go test -v -run TestName ./path/to/pkg # Run single test
 go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRED after changes)
-./build-panel.sh # Build web/management-center into static/management.html (needs bun 1.3.14)
+./build-panel.sh # Build web/management-center into static/management.html (needs bun; the panel pins bun@1.4.3, and bun 1.3.14 also builds it)
 scripts/deploy.sh [ref] # Build binary + panel from one commit, install both, restart, health-check, auto-rollback (default origin/main)
 scripts/deploy-test.sh # Test scripts/deploy.sh against a transient systemd unit on a port in 18390-18399 (never the live proxy)
 scripts/update-model-prices.sh # Refresh the embedded LiteLLM price snapshot (internal/usagehistory/prices/litellm_trimmed.json) through cmd/trim-prices

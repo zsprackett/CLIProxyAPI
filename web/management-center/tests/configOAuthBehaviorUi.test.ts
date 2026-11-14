@@ -28,8 +28,8 @@ const server = {
 };
 
 describe('OAuth behavior configuration UI', () => {
-  test('keeps seven canonical tabs and places every addition in its designated section', () => {
-    expect(CONFIG_SECTION_IDS).toHaveLength(7);
+  test('keeps six canonical tabs and places every addition in its designated section', () => {
+    expect(CONFIG_SECTION_IDS).toHaveLength(6);
     const network = render(createElement(SectionNetwork, props));
     const advanced = render(createElement(SectionAdvanced, props));
     const additions = CONFIG_FIELD_SEARCH_INDEX.filter((entry) =>
@@ -43,7 +43,7 @@ describe('OAuth behavior configuration UI', () => {
       expect(other).not.toContain(`id="cfg-field-${entry.fieldId}"`);
       expect(own).toContain(escapeText(translations.t(entry.labelKey)));
       expect(own).toContain(escapeText(translations.t(entry.hintKey!)));
-      expect(entry.yamlKeys?.join('.')).toMatch(/^(routing|multimedia|oauth)\./);
+      expect(entry.yamlKeys?.join('.')).toMatch(/^(routing|multimedia|oauth|upstream|client)\./);
     }
     const oauth = render(createElement(SectionOAuthBehavior, props));
     expect(oauth).toContain('<details');

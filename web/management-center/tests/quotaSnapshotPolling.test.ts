@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import i18n from '@/i18n';
 import { QUOTA_ADAPTERS } from '@/features/quota/providers';
 import type { QuotaSnapshot } from '@/features/quota/snapshot/types';
-import { apiCallApi } from '@/services/api';
+import { apiCallApi, authFilesApi } from '@/services/api';
 import { apiClient } from '@/services/api/client';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import type { AuthFileItem } from '@/types';
@@ -108,11 +108,28 @@ describe('Load quota', () => {
 });
 
 describe('Codex manual reset', () => {
-  test('spends one credit through api-call, then polls once', async () => {
+  test('spends one credit through api-call, clears the cooldown, then polls once', async () => {
     const snapshot = codexSnapshot();
     post = spyOn(apiClient, 'post').mockResolvedValue({ quota_snapshot: snapshot });
+    apiCall.mockResolvedValue({
+      statusCode: 200,
+      header: {},
+      bodyText: '{"code":"reset"}',
+      body: { code: 'reset' },
+    });
+    const clear = spyOn(authFilesApi, 'resetCooldown').mockResolvedValue({
+      status: 'ok',
+      auth_index: 'idx-c',
+      models: [],
+    });
 
-    const data = await QUOTA_ADAPTERS.codex.resetQuota?.(codexFile, t);
+    let clearCalls: unknown[][] = [];
+    const data = await QUOTA_ADAPTERS.codex.resetQuota?.(codexFile, t).finally(() => {
+      clearCalls = [...clear.mock.calls];
+      clear.mockRestore();
+    });
+
+    expect(clearCalls).toEqual([['idx-c']]);
 
     expect(apiCall.mock.calls.length).toBe(1);
     const [request] = apiCall.mock.calls[0] as [Record<string, unknown>];

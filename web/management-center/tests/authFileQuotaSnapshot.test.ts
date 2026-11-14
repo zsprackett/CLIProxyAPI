@@ -76,7 +76,7 @@ describe('auth-file quota section', () => {
   test('a failed click still shows the snapshot windows and the error', () => {
     serverState.quotaPolls = { 'claude-a.json': { status: 'error', error: 'upstream timeout' } };
     const markup = renderSection(claudeFile(claudeReading(50, NOW - HOUR)));
-    expect(markup).toContain('7-day limit');
+    expect(markup).toContain('Weekly limit');
     expect(markup).toContain('50%');
     expect(markup).toContain('Max');
     expect(markup).toContain('upstream timeout');

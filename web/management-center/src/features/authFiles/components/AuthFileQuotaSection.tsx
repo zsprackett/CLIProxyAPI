@@ -50,7 +50,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
   const adapter = QUOTA_ADAPTERS[quotaType];
   const cacheKey = getQuotaCacheKey(file);
 
-  const storedQuota = useQuotaStore((state) => {
+  const quota = useQuotaStore((state) => {
     if (quotaType === 'antigravity')
       return state.antigravityQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'claude' || quotaType === 'codex') {
@@ -59,10 +59,10 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
     if (quotaType === 'devin') return state.devinQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'kimi') return state.kimiQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'meta') return state.metaQuota[cacheKey] as QuotaCardState | undefined;
+    if (quotaType === 'plugin') return state.pluginQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'xai') return state.xaiQuota[cacheKey] as QuotaCardState | undefined;
     return assertNever(quotaType);
   });
-  const quota = storedQuota;
   const polledSnapshots = useQuotaStore((state) => state.quotaSnapshots);
 
   const updateQuotaState = useQuotaStore(
@@ -73,7 +73,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
     if (disableControls) return;
     if (isRuntimeOnlyAuthFile(file)) return;
     if (file.disabled) return;
-    if (quota?.status === 'loading') return;
+    if (quota?.status === 'loading' || resettingQuota) return;
 
     const cacheGeneration = captureQuotaCacheGeneration(file.name);
 
@@ -120,6 +120,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
     disableControls,
     file,
     quota?.status,
+    resettingQuota,
     showNotification,
     t,
     updateQuotaState,
@@ -186,6 +187,9 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
   const canUseResetQuota = canRefreshQuota && quotaStatus !== 'loading';
   const showResetQuotaAction =
     showSnapshot && snapshot !== null && Boolean(adapter.canResetQuota?.(snapshot));
+  // Idle state already renders a clickable "click to refresh" prompt; only offer the
+  // explicit refresh button once quota has been requested so it can be refreshed again.
+  const showRefreshQuotaAction = quotaStatus !== 'idle';
   const resetQuotaAction =
     adapter.resetQuota && showResetQuotaAction ? (
       <Button
@@ -236,10 +240,10 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
       ) : (
         <div className={styles.quotaMessage}>{t(`${adapter.i18nPrefix}.idle`)}</div>
       )}
-      {(resetQuotaAction || (quotaStatus !== 'idle' && quotaType === 'devin')) && (
+      {(showRefreshQuotaAction || resetQuotaAction) && (
         <div className={styles.quotaCardActions}>
           {resetQuotaAction}
-          {quotaType === 'devin' && (
+          {showRefreshQuotaAction && (
             <Button
               type="button"
               variant="secondary"

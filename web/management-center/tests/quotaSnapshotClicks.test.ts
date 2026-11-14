@@ -169,8 +169,8 @@ afterAll(() => {
 describe('a credential re-added at the same path', () => {
   test('shows no poll result of the account it replaced', async () => {
     await clickLoadQuota(claudeFile());
-    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="codexPlanValue">Max</span>');
-    expect(renderAuthFileSection(claudeFile())).toContain('7-day limit');
+    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="premiumPlanValue">Max</span>');
+    expect(renderAuthFileSection(claudeFile())).toContain('Weekly limit');
 
     invalidateAuthFileDerivedCaches(() => {}, ['claude-a.json']);
 
@@ -179,7 +179,7 @@ describe('a credential re-added at the same path', () => {
     expect(card).not.toContain('Max');
     const section = renderAuthFileSection(claudeFile());
     expect(section).toContain('Click here to refresh quota');
-    expect(section).not.toContain('7-day limit');
+    expect(section).not.toContain('Weekly limit');
     expect(section).not.toContain('Max');
   });
 
@@ -188,7 +188,7 @@ describe('a credential re-added at the same path', () => {
 
     invalidateAuthFileDerivedCaches(() => {}, ['claude-other.json']);
 
-    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="codexPlanValue">Max</span>');
+    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="premiumPlanValue">Max</span>');
   });
 });
 
@@ -258,7 +258,7 @@ describe('the answer to a click on the quota page', () => {
     await clickLoadQuota(claudeFile());
 
     const card = renderQuotaPageCard(claudeFile());
-    expect(card).toContain('7-day limit');
+    expect(card).toContain('Weekly limit');
     expect(card).not.toContain('Stale since');
     expect(card).not.toContain('Last quota poll failed');
     expect(toasts()).toEqual([['success', 'Quota refreshed for "claude-a.json"']]);
@@ -270,7 +270,7 @@ describe('the answer to a click on the quota page', () => {
     await clickLoadQuota(claudeFile());
 
     const card = renderQuotaPageCard(claudeFile());
-    expect(card).toContain('7-day limit');
+    expect(card).toContain('Weekly limit');
     expect(card).toContain('Stale since');
     expect(card).toContain(`Last quota poll failed: ${usageError}`);
     const section = renderAuthFileSection(claudeFile());
@@ -318,7 +318,7 @@ describe('the answer to a click on the quota page', () => {
     await Promise.all([first, second]);
 
     expect(requests).toEqual([['/credentials/quota/poll', { auth_index: 'idx-a' }]]);
-    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="codexPlanValue">Max</span>');
+    expect(renderQuotaPageCard(claudeFile())).toContain('<span class="premiumPlanValue">Max</span>');
   });
 });
 

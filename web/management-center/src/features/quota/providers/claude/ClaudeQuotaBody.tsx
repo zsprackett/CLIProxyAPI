@@ -1,24 +1,40 @@
 /**
- * Claude quota body: plan and extra-usage chips, then the snapshot windows.
+ * Claude quota body: plan and extra-usage chips, host slots, then the snapshot windows.
  */
 
 import { useTranslation } from 'react-i18next';
+import { planValueClassForTier, resolveClaudeCardTier } from '../../cardTier';
 import { WindowList } from '../../snapshot/WindowList';
 import type { SnapshotBodyProps } from '../../types';
 
-export function ClaudeQuotaBody({ snapshot, extras, classes, nowMs }: SnapshotBodyProps<'claude'>) {
+export function ClaudeQuotaBody({
+  snapshot,
+  extras,
+  classes,
+  nowMs,
+  planItems,
+  afterPlan,
+}: SnapshotBodyProps<'claude'>) {
   const { t } = useTranslation();
   const plan = extras.plan?.value ?? null;
   const extraUsage = extras.extra_usage?.value ?? null;
 
   return (
     <>
-      {plan && (
+      {(plan || planItems) && (
         <div className={classes.codexPlan}>
-          <span className={classes.codexPlanLabel}>{t('claude_quota.plan_label')}</span>
-          <span className={classes.codexPlanValue}>{t(`claude_quota.${plan}`)}</span>
+          {plan && (
+            <span className={classes.codexPlanItem} data-quota-plan="">
+              <span className={classes.codexPlanLabel}>{t('claude_quota.plan_label')}</span>
+              <span className={planValueClassForTier(resolveClaudeCardTier(plan), classes)}>
+                {t(`claude_quota.${plan}`)}
+              </span>
+            </span>
+          )}
+          {planItems}
         </div>
       )}
+      {afterPlan}
       {extraUsage?.enabled && (
         <div className={classes.codexPlan}>
           <span className={classes.codexPlanLabel}>{t('claude_quota.extra_usage_label')}</span>
