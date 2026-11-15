@@ -178,6 +178,53 @@ describe('oauthApi.startAuth login proxy contract', () => {
  * auth_files_v8.go) over proxyutil.Parse / ValidRequestProxy (sdk/proxyutil/proxy.go) and Go
  * 1.26 net/url.Parse. These verdicts were cross-checked against the Go implementation.
  */
+describe('oauthApi.startAuth credential target', () => {
+  test('a targeted GET sends auth_index and verify as query parameters', async () => {
+    const { sent, post } = captureTransport(ok);
+
+    await oauthApi.startAuth('anthropic', undefined, { authIndex: ' 7 ', verify: true });
+
+    expect(post).not.toHaveBeenCalled();
+    expect(sent.map(({ method, uri }) => [method, uri])).toEqual([
+      ['GET', '/oauth/auth-url?provider=claude&is_webui=true&auth_index=7&verify=true'],
+    ]);
+  });
+
+  test('a targeted login with a proxy sends the target in the POST body', async () => {
+    const { sent, get } = captureTransport(ok);
+
+    await oauthApi.startAuth('codex', undefined, {
+      proxyUrl: PROXY,
+      authIndex: '3',
+      verify: true,
+    });
+
+    expect(get).not.toHaveBeenCalled();
+    expect(sent).toEqual([
+      {
+        method: 'POST',
+        uri: '/oauth/auth-url',
+        params: undefined,
+        body: {
+          provider: 'codex',
+          is_webui: true,
+          auth_index: '3',
+          verify: true,
+          proxy_url: PROXY,
+        },
+      },
+    ]);
+  });
+
+  test('an untargeted login sends neither field', async () => {
+    const { sent } = captureTransport(ok);
+
+    await oauthApi.startAuth('codex', undefined, { authIndex: '  ', verify: false });
+
+    expect(sent.map(({ uri }) => uri)).toEqual(['/oauth/auth-url?provider=codex&is_webui=true']);
+  });
+});
+
 describe('login proxy validation mirrors the backend', () => {
   const accepted = [
     'socks5://user:pass@127.0.0.1:1080',
