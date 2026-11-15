@@ -2884,5 +2884,16 @@
     "error": "Liên kết thất bại. Hãy bắt đầu lại.",
     "unsupported": "Máy chủ này không hỗ trợ liên kết SIWC.",
     "expired": "Phiên liên kết đã hết hạn. Hãy bắt đầu lại."
+  },
+  "auth_reauth": {
+    "button": "Đăng nhập lại",
+    "button_aria": "Đăng nhập lại vào {{name}}",
+    "required_hint": "Thông tin xác thực này cần đăng nhập lại.",
+    "suggested_hint": "Gia hạn token liên tục thất bại. Đăng nhập lại thường khắc phục được.",
+    "dialog_title": "Đăng nhập lại vào {{name}}",
+    "success_title": "Đã đăng nhập lại",
+    "success_hint": "Thông tin xác thực đã được cập nhật tại chỗ và giữ nguyên các thiết lập.",
+    "success_warning_title": "Đã đăng nhập, nhưng thông tin xác thực này cần được kiểm tra:",
+    "success_warning_hint": "Lần đăng nhập mới đã được lưu. Hãy kiểm tra thông tin xác thực này ở trang File xác thực."
   }
 }

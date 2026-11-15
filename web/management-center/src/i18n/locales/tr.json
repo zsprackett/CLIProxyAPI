@@ -2878,5 +2878,16 @@
     "error": "Bağlama Başarısız Oldu. Lütfen Yeniden Başla.",
     "unsupported": "Bu Arka Uç SIWC Bağlamayı Desteklemiyor.",
     "expired": "Bağlama Oturumunun Süresi Doldu. Lütfen Yeniden Başla."
+  },
+  "auth_reauth": {
+    "button": "Yeniden Oturum Aç",
+    "button_aria": "{{name}} İçin Yeniden Oturum Aç",
+    "required_hint": "Bu kimlik bilgisi için yeniden oturum açılması gerekiyor.",
+    "suggested_hint": "Token yenileme sürekli başarısız oluyor. Yeniden oturum açmak genellikle sorunu çözer.",
+    "dialog_title": "{{name}} İçin Yeniden Oturum Aç",
+    "success_title": "Yeniden Oturum Açıldı",
+    "success_hint": "Kimlik bilgisi yerinde güncellendi ve ayarları korundu.",
+    "success_warning_title": "Oturum açıldı, ancak kimlik bilgisi ilgi gerektiriyor:",
+    "success_warning_hint": "Yeni oturum kaydedildi. Bu kimlik bilgisini Kimlik Dosyaları sayfasında kontrol edin."
   }
 }

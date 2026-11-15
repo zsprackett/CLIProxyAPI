@@ -39,11 +39,13 @@ export interface OAuthFlowDialogProps {
   supportsCallback: boolean;
   /** 赞助商：品牌蓝主按钮 + 提示行里的注册链接。 */
   sponsor?: { url: string; label: string };
+  /** `reauth` signs one existing credential in again: success updates it in place. */
+  mode?: 'add' | 'reauth';
   onStart: () => void;
   onCancel: () => void;
   onCallbackChange: (value: string) => void;
   onCallbackSubmit: () => void;
-  onViewAuthFiles: () => void;
+  onViewAuthFiles?: () => void;
   onClose: () => void;
 }
 
@@ -353,8 +355,10 @@ function FlowStatusBar({ providerId, state, text, onStart, onCancel }: OAuthFlow
   );
 }
 
-function SuccessView({ text, onStart, onViewAuthFiles }: OAuthFlowDialogProps) {
+function SuccessView(props: OAuthFlowDialogProps) {
+  const { text, onStart, onViewAuthFiles } = props;
   const { t } = useTranslation();
+  if (props.mode === 'reauth') return <ReauthSuccessView {...props} />;
   return (
     <div className={styles.result} role="status">
       <svg className={styles.successMark} viewBox="0 0 52 52" aria-hidden="true">
@@ -364,11 +368,41 @@ function SuccessView({ text, onStart, onViewAuthFiles }: OAuthFlowDialogProps) {
       <div className={styles.resultTitle}>{text('oauth_status_success')}</div>
       <p className={styles.resultHint}>{t('auth_login.success_saved_hint')}</p>
       <div className={styles.resultActions}>
-        <button type="button" className={styles.secondary} onClick={onViewAuthFiles}>
-          {t('auth_login.view_auth_files')}
-        </button>
+        {onViewAuthFiles && (
+          <button type="button" className={styles.secondary} onClick={onViewAuthFiles}>
+            {t('auth_login.view_auth_files')}
+          </button>
+        )}
         <button type="button" className={styles.primary} onClick={onStart}>
           {t('auth_login.login_another_account')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReauthSuccessView({ state, onClose }: OAuthFlowDialogProps) {
+  const { t } = useTranslation();
+  const warning = state.warning;
+  return (
+    <div className={styles.result} role="status">
+      {warning ? (
+        <div className={styles.alert} role="alert">
+          <strong>{t('auth_reauth.success_warning_title')}</strong> {warning}
+        </div>
+      ) : (
+        <svg className={styles.successMark} viewBox="0 0 52 52" aria-hidden="true">
+          <circle className={styles.successRing} cx="26" cy="26" r="24" />
+          <path className={styles.successCheck} d="M16 27l7 7 14-15" />
+        </svg>
+      )}
+      {!warning && <div className={styles.resultTitle}>{t('auth_reauth.success_title')}</div>}
+      <p className={styles.resultHint}>
+        {t(warning ? 'auth_reauth.success_warning_hint' : 'auth_reauth.success_hint')}
+      </p>
+      <div className={styles.resultActions}>
+        <button type="button" className={styles.primary} onClick={onClose}>
+          {t('common.close')}
         </button>
       </div>
     </div>

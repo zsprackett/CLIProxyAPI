@@ -2870,5 +2870,16 @@
     "error": "绑定失败，请重新开始。",
     "unsupported": "当前后端不支持 SIWC 绑定。",
     "expired": "绑定会话已过期，请重新开始。"
+  },
+  "auth_reauth": {
+    "button": "重新登录",
+    "button_aria": "重新登录 {{name}}",
+    "required_hint": "此凭证需要重新登录。",
+    "suggested_hint": "令牌续期持续失败，重新登录通常可以解决。",
+    "dialog_title": "重新登录 {{name}}",
+    "success_title": "已重新登录",
+    "success_hint": "凭证已原地更新，原有设置均已保留。",
+    "success_warning_title": "已登录，但该凭证需要处理：",
+    "success_warning_hint": "新的登录已保存。请在认证文件页面检查此凭证。"
   }
 }

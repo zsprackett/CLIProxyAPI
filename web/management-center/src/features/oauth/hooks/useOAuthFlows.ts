@@ -7,6 +7,7 @@ import { notifyAuthFilesChanged } from '@/features/authFiles/authFilesEvents';
 import { createOAuthAttempts, type OAuthAttempt } from '../oauthAttempts';
 import { validateDevinCallback } from '../devinOAuth';
 import { resolveCallbackUrl } from '../callbackUrl';
+import { targetedCompletionWarning } from '../flowView';
 import { isInvalidProxyUrlError, planLoginProxy } from '../loginProxy';
 import {
   buildPluginOAuthProviderCards,
@@ -31,6 +32,14 @@ export interface ProviderFlowState {
   callbackValidation?: string;
   /** 本次尝试使用的登录代理（原值，仅内存；展示时必须脱敏）。 */
   proxyUrl?: string;
+  /** The credential this attempt signs in again, as its auth_index. */
+  targetAuthIndex?: string;
+  /** A targeted login saved the credential but adoption or verification failed. */
+  warning?: string;
+}
+
+export interface OAuthFlowTarget {
+  authIndex: string;
 }
 
 interface UseOAuthFlowsOptions {
@@ -155,7 +164,7 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
     setStates((prev) => ({ ...prev, [provider]: {} }));
   };
 
-  const completeProviderAuth = (provider: string) => {
+  const completeProviderAuth = (provider: string, warning?: string) => {
     const resetAttempt = attempts.current.begin(provider);
     notifyAuthFilesChanged();
     recordCredentialAdded();
@@ -163,6 +172,7 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
       url: undefined,
       state: undefined,
       status: 'success',
+      warning,
       error: undefined,
       polling: false,
       cancelling: false,
@@ -179,13 +189,23 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
     }, SUCCESS_RESET_DELAY_MS);
   };
 
-  const startPolling = (provider: string, state: string, attempt: OAuthAttempt) => {
+  const startPolling = (
+    provider: string,
+    state: string,
+    attempt: OAuthAttempt,
+    targeted: boolean
+  ) => {
     attempt.poll(
       () => oauthApi.getAuthStatus(state, attempt.signal),
       (res) => {
         if (res.status === 'ok') {
-          completeProviderAuth(provider);
-          notify(provider, providerText(provider, 'oauth_status_success'), 'success');
+          const warning = targeted ? targetedCompletionWarning(res) : undefined;
+          completeProviderAuth(provider, warning);
+          if (warning) {
+            notify(provider, `${t('auth_reauth.success_warning_title')} ${warning}`, 'warning');
+          } else {
+            notify(provider, providerText(provider, 'oauth_status_success'), 'success');
+          }
         } else if (res.status === 'error') {
           if (provider === 'devin') {
             // Expired, denied and cancelled states cannot accept another callback.
@@ -256,10 +276,10 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
       status: 'waiting',
       error: undefined,
     });
-    startPolling(provider, state, attempt);
+    startPolling(provider, state, attempt, Boolean(states[provider]?.targetAuthIndex));
   };
 
-  const startAuth = async (provider: string) => {
+  const startAuth = async (provider: string, target?: OAuthFlowTarget) => {
     // A network error can stop polling while the server is still waiting. Require
     // explicit cancellation before replacing that Devin session.
     if (provider === 'devin' && states[provider]?.state) return;
@@ -277,6 +297,8 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
       callbackUrl: '',
       callbackSubmitting: false,
       proxyUrl: proxyPlan.kind === 'proxy' ? proxyPlan.url : undefined,
+      targetAuthIndex: target?.authIndex,
+      warning: undefined,
     };
     if (proxyPlan.kind === 'invalid') {
       // Never fall back to a login without the requested proxy: fail before any request.
@@ -298,11 +320,10 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
       error: undefined,
     });
     try {
-      const res = await oauthApi.startAuth(
-        provider,
-        attempt.signal,
-        proxyPlan.kind === 'proxy' ? { proxyUrl: proxyPlan.url } : undefined
-      );
+      const res = await oauthApi.startAuth(provider, attempt.signal, {
+        ...(proxyPlan.kind === 'proxy' ? { proxyUrl: proxyPlan.url } : {}),
+        ...(target ? { authIndex: target.authIndex, verify: true } : {}),
+      });
       if (!attempt.isCurrent()) return;
       if (!res.state) {
         const message = t('auth_login.missing_state');
@@ -323,7 +344,7 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
         status: 'waiting',
         polling: true,
       });
-      startPolling(provider, res.state, attempt);
+      startPolling(provider, res.state, attempt, Boolean(target));
     } catch (err: unknown) {
       if (!attempt.isCurrent()) return;
       const proxyRejected = proxyPlan.kind === 'proxy' && isInvalidProxyUrlError(err);
@@ -397,7 +418,7 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
       const loginState = states[provider]?.state;
       if (loginState && !attempt.isPolling()) {
         updateProviderState(provider, { status: 'waiting', error: undefined, polling: true });
-        startPolling(provider, loginState, attempt);
+        startPolling(provider, loginState, attempt, Boolean(states[provider]?.targetAuthIndex));
       }
     } catch (err: unknown) {
       if (!attempt.isCurrent()) return;
@@ -438,6 +459,7 @@ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions
     setLoginProxy,
     providerText,
     startAuth,
+    abandonAuth: resetProviderAttempt,
     cancelAuth,
     submitCallback,
     setCallbackInput,

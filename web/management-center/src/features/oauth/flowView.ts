@@ -1,3 +1,4 @@
+import type { OAuthStatusResponse } from '@/services/api/oauth';
 import type { ProviderFlowState } from './hooks/useOAuthFlows';
 
 export type FlowView = 'idle' | 'flow' | 'success' | 'failed';
@@ -23,4 +24,15 @@ export const splitAuthUrl = (url: string): { host: string; rest: string } => {
   } catch {
     return { host: '', rest: url };
   }
+};
+
+/**
+ * A targeted login can save the credential but still fail adoption or verification.
+ * The status is `ok` then, so the message is the only signal that it is not clean.
+ */
+export const targetedCompletionWarning = (res: OAuthStatusResponse): string | undefined => {
+  const messages = [res.adoption_error, res.verification_error]
+    .map((message) => message?.trim())
+    .filter(Boolean);
+  return messages.length > 0 ? messages.join('; ') : undefined;
 };
