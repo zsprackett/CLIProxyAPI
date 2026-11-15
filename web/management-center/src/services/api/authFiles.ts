@@ -5,7 +5,7 @@
 import { apiClient } from './client';
 import { getConfigValue, guardConfigConnection } from './configValue';
 import { isRecord } from '@/utils/helpers';
-import type { AuthFilesResponse } from '@/types/authFile';
+import type { AuthFileRefreshError, AuthFilesResponse } from '@/types/authFile';
 import type { OAuthModelAliasEntry } from '@/types';
 import { normalizeOAuthProviderKey } from '@/utils/providerKeys';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
@@ -260,6 +260,17 @@ const readBooleanField = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
+const readRefreshError = (value: unknown): AuthFileRefreshError | undefined => {
+  if (!isRecord(value) || typeof value.code !== 'string' || !value.code.trim()) return undefined;
+  const message = typeof value.message === 'string' ? value.message.trim() : '';
+  const httpStatus = readIntegerField(value.http_status ?? value.httpStatus);
+  return {
+    code: value.code.trim(),
+    ...(message ? { message } : {}),
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+  };
+};
+
 /**
  * Normalize backend kebab/snake_case fields into AuthFileItem camelCase fields.
  * Preserve raw fields for quota resolvers that read plan_type, id_token,
@@ -285,6 +296,10 @@ const normalizeAuthFileEntry = (
     readTextField(entry, 'quota_provider') || readTextField(entry, 'quotaProvider');
   const quotaPluginId =
     readTextField(entry, 'quota_plugin_id') || readTextField(entry, 'quotaPluginId');
+  const requiresSignIn = readBooleanField(entry['requires_sign_in'] ?? entry.requiresSignIn);
+  const renewalState =
+    readTextField(entry, 'renewal_state') || readTextField(entry, 'renewalState');
+  const refreshError = readRefreshError(entry['refresh_error'] ?? entry.refreshError);
 
   return {
     ...entry,
@@ -298,6 +313,9 @@ const normalizeAuthFileEntry = (
     ...(supportsQuota !== undefined ? { supportsQuota } : {}),
     ...(quotaProvider ? { quotaProvider } : {}),
     quotaPluginId: quotaPluginId || undefined,
+    ...(requiresSignIn !== undefined ? { requiresSignIn } : {}),
+    ...(renewalState ? { renewalState } : {}),
+    ...(refreshError ? { refreshError } : {}),
     recentRequests: normalizeRecentRequestBuckets(entry.recent_requests ?? entry.recentRequests),
     successCount: normalizeUsageTotal(entry.success),
     failureCount: normalizeUsageTotal(entry.failed),
