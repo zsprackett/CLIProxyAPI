@@ -16,13 +16,16 @@ export interface PolicyPanelProps {
 }
 
 function StrategyMark({ strategy }: { strategy: RoutingStrategy }) {
-  // Three dots: even (round-robin), graded (weighted), first one filled (fill-first).
+  // Three dots: even (round-robin), graded (weighted), first one filled (fill-first),
+  // last one filled (soonest-reset picks one credential by its next reset).
   const opacities =
     strategy === 'round-robin'
       ? [1, 1, 1]
       : strategy === 'weighted-round-robin'
         ? [1, 0.6, 0.3]
-        : [1, 0.25, 0.25];
+        : strategy === 'soonest-reset'
+          ? [0.25, 0.25, 1]
+          : [1, 0.25, 0.25];
   return (
     <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true" focusable="false">
       {opacities.map((opacity, index) => (

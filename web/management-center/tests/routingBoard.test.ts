@@ -16,6 +16,7 @@ import {
   buildRoutingBoard,
   buildRoutingConfigPatch,
   credentialWrites,
+  normalizeRoutingStrategy,
   readRoutingSettings,
 } from '../src/services/api/routing';
 import type { AuthFileItem } from '../src/types/authFile';
@@ -388,12 +389,17 @@ describe('route preview', () => {
     expect(loading.tiers[0].members[0].state).toBe('unknown');
   });
 
-  test('fill-first has no fixed split', () => {
+  test.each(['fill-first', 'soonest-reset'] as const)('%s has no fixed split', (strategy) => {
     const current = board();
     const draft = draftFromBoard(current);
-    draft.settings = { ...draft.settings, strategy: 'fill-first' };
+    draft.settings = { ...draft.settings, strategy };
     const preview = resolveRoute(current, draft, catalog, null, 0);
     expect(preview.tiers[0].state).toBe('active');
     expect(preview.tiers[0].members[0].share).toBeNull();
+  });
+
+  test('reads soonest-reset from the config instead of falling back to round-robin', () => {
+    expect(normalizeRoutingStrategy('soonest-reset')).toBe('soonest-reset');
+    expect(normalizeRoutingStrategy('Soonest_Reset')).toBe('soonest-reset');
   });
 });

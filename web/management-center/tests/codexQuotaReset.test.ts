@@ -78,6 +78,13 @@ describe('Codex reset gateway cooldown', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  test('re-reads the snapshot after a spent credit whose cooldown clear failed', async () => {
+    const { calls, clear } = setup({ code: 'reset' });
+    clear.mockRejectedValue(new Error('offline'));
+    await expect(reset()).rejects.toThrow('codex_quota.reset_cooldown_failed');
+    expect(calls).toEqual(['consume', 'read']);
+  });
+
   test('rejects mismatched cooldown acknowledgements', async () => {
     const { clear } = setup({ code: 'reset' });
     clear.mockResolvedValue({ status: 'ok', auth_index: 'other-index', models: [] });

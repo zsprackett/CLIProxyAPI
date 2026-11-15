@@ -70,7 +70,18 @@ const pollCodexQuota = pollQuota('codex_quota');
 export const CODEX_CONFIG: SnapshotPollConfig = {
   ...snapshotPollConfig('codex', (file) => isCodexFile(file) && !isDisabledAuthFile(file)),
   resetQuota: async (file, t) => {
-    await redeemCodexResetCredit(file, t);
+    try {
+      await redeemCodexResetCredit(file, t);
+    } catch (error) {
+      // The credit is spent when only the cooldown clear failed: refresh the snapshot so the
+      // card stops offering a reset that would spend a second credit.
+      if (error instanceof Error && error.message === t('codex_quota.reset_cooldown_failed')) {
+        await pollCodexQuota(file, t)
+          .then((snapshot) => storeSnapshot(file, snapshot))
+          .catch(() => undefined);
+      }
+      throw error;
+    }
     return pollCodexQuota(file, t);
   },
   canResetQuota: (snapshot) =>
