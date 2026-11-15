@@ -63,7 +63,7 @@ describe('QuotaForecastView rendering', () => {
   test('offers the pool classes and chart views as pressed toggles', () => {
     const markup = render({});
     expect(markup).toMatch(/aria-pressed="true"[^>]*>5-hour limit</);
-    expect(markup).toMatch(/aria-pressed="false"[^>]*>7-day limit</);
+    expect(markup).toMatch(/aria-pressed="false"[^>]*>Weekly limit</);
     expect(markup).toMatch(/aria-pressed="true"[^>]*>Remaining</);
     expect(markup).toMatch(/aria-pressed="false"[^>]*>By account</);
 

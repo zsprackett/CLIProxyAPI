@@ -1253,8 +1253,6 @@ function getNextDirtyFields(
       'maxRetryCredentials',
       'maxRetryInterval',
       'wsAuth',
-      'quotaSwitchProject',
-      'quotaSwitchPreviewModel',
       'quotaAntigravityCredits',
       'routingStrategy',
       'routingSessionAffinity',
@@ -1420,7 +1418,8 @@ function parseVisualValuesFromYaml(yamlContent: string): VisualConfigValues {
   const v8OauthProviders = asRecord(v8Oauth?.['providers']);
   const v8OauthProvidersAistudio = asRecord(v8OauthProviders?.['aistudio']);
   const v8OauthProvidersCodex = asRecord(v8OauthProviders?.['codex']);
-  const v8OauthProvidersClaude = asRecord(v8OauthProviders?.['claude']);
+  const v8Upstream = asRecord(parsed?.['upstream']);
+  const v8UpstreamClaude = asRecord(v8Upstream?.['claude']);
   const v8OauthProvidersAntigravity = asRecord(v8OauthProviders?.['antigravity']);
   const v8Multimedia = asRecord(parsed?.['multimedia']);
   const v8Observability = asRecord(parsed?.['observability']);
@@ -1428,14 +1427,13 @@ function parseVisualValuesFromYaml(yamlContent: string): VisualConfigValues {
   const v8ObservabilityUsage = asRecord(v8Observability?.['usage']);
   const tls = asRecord(v8Server?.['tls']);
   const remoteManagement = asRecord(parsed['management']);
-  const quotaExceeded = asRecord(parsed['quota-exceeded']);
   const routing = asRecord(parsed.routing);
   const payload = asRecord(v8Requests?.['payload']);
   const streaming = asRecord(v8Requests?.['streaming']);
   const plugins = asRecord(parsed.plugins);
   const antigravity = asRecord(v8OauthProviders?.['antigravity']);
   const devin = asRecord(v8OauthProviders?.['devin']);
-  const claudeHeaderDefaults = asRecord(v8OauthProvidersClaude?.['header-defaults']);
+  const claudeHeaderDefaults = asRecord(v8UpstreamClaude?.['header-defaults']);
   const codexHeaderDefaults = asRecord(v8OauthProvidersCodex?.['header-defaults']);
 
   const newValues: VisualConfigValues = {
@@ -1526,12 +1524,6 @@ function parseVisualValuesFromYaml(yamlContent: string): VisualConfigValues {
         ? codexHeaderDefaults['beta-features']
         : '',
 
-    quotaSwitchProject: Boolean(
-      quotaExceeded?.['switch-project'] ?? DEFAULT_VISUAL_VALUES.quotaSwitchProject
-    ),
-    quotaSwitchPreviewModel: Boolean(
-      quotaExceeded?.['switch-preview-model'] ?? DEFAULT_VISUAL_VALUES.quotaSwitchPreviewModel
-    ),
     quotaAntigravityCredits: Boolean(antigravity?.['antigravity-credits'] ?? false),
 
     routingStrategy: parseRoutingStrategy(routing?.strategy),
@@ -1907,57 +1899,57 @@ export function useVisualConfig() {
           dirtyFields.has('claudeHeaderTimeout') ||
           dirtyFields.has('claudeHeaderStabilizeDeviceProfile');
         if (claudeHeadersDirty) {
-          ensureMapInDoc(doc, ['oauth', 'providers', 'claude', 'header-defaults']);
+          ensureMapInDoc(doc, ['upstream', 'claude', 'header-defaults']);
           if (dirtyFields.has('claudeHeaderUserAgent')) {
             setStringInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'user-agent'],
+              ['upstream', 'claude', 'header-defaults', 'user-agent'],
               values.claudeHeaderUserAgent
             );
           }
           if (dirtyFields.has('claudeHeaderPackageVersion')) {
             setStringInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'package-version'],
+              ['upstream', 'claude', 'header-defaults', 'package-version'],
               values.claudeHeaderPackageVersion
             );
           }
           if (dirtyFields.has('claudeHeaderRuntimeVersion')) {
             setStringInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'runtime-version'],
+              ['upstream', 'claude', 'header-defaults', 'runtime-version'],
               values.claudeHeaderRuntimeVersion
             );
           }
           if (dirtyFields.has('claudeHeaderOs')) {
             setStringInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'os'],
+              ['upstream', 'claude', 'header-defaults', 'os'],
               values.claudeHeaderOs
             );
           }
           if (dirtyFields.has('claudeHeaderArch')) {
             setStringInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'arch'],
+              ['upstream', 'claude', 'header-defaults', 'arch'],
               values.claudeHeaderArch
             );
           }
           if (dirtyFields.has('claudeHeaderTimeout')) {
             setStringInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'timeout'],
+              ['upstream', 'claude', 'header-defaults', 'timeout'],
               values.claudeHeaderTimeout
             );
           }
           if (dirtyFields.has('claudeHeaderStabilizeDeviceProfile')) {
             setBooleanInDoc(
               doc,
-              ['oauth', 'providers', 'claude', 'header-defaults', 'stabilize-device-profile'],
+              ['upstream', 'claude', 'header-defaults', 'stabilize-device-profile'],
               values.claudeHeaderStabilizeDeviceProfile
             );
           }
-          deleteIfMapEmpty(doc, ['oauth', 'providers', 'claude', 'header-defaults']);
+          deleteIfMapEmpty(doc, ['upstream', 'claude', 'header-defaults']);
         }
 
         const codexHeadersDirty =
@@ -1981,25 +1973,12 @@ export function useVisualConfig() {
           deleteIfMapEmpty(doc, ['oauth', 'providers', 'codex', 'header-defaults']);
         }
 
-        const quotaDirty =
-          dirtyFields.has('quotaSwitchProject') ||
-          dirtyFields.has('quotaSwitchPreviewModel') ||
-          dirtyFields.has('quotaAntigravityCredits');
-        if (quotaDirty) {
-          ensureMapInDoc(doc, ['quota-exceeded']);
-          if (dirtyFields.has('quotaSwitchProject')) {
-            doc.setIn(['quota-exceeded', 'switch-project'], values.quotaSwitchProject);
-          }
-          if (dirtyFields.has('quotaSwitchPreviewModel')) {
-            doc.setIn(['quota-exceeded', 'switch-preview-model'], values.quotaSwitchPreviewModel);
-          }
-          if (dirtyFields.has('quotaAntigravityCredits')) {
-            doc.setIn(
-              ['oauth', 'providers', 'antigravity', 'antigravity-credits'],
-              values.quotaAntigravityCredits
-            );
-          }
-          deleteIfMapEmpty(doc, ['quota-exceeded']);
+        if (dirtyFields.has('quotaAntigravityCredits')) {
+          ensureMapInDoc(doc, ['oauth', 'providers', 'antigravity']);
+          doc.setIn(
+            ['oauth', 'providers', 'antigravity', 'antigravity-credits'],
+            values.quotaAntigravityCredits
+          );
         }
 
         const routingDirty =

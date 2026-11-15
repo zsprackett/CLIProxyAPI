@@ -76,6 +76,20 @@ export interface AntigravityQuotaState {
   errorStatus?: number;
 }
 
+/** A provider-defined numeric/currency value rendered above generic quota windows. */
+export interface PluginQuotaMetric {
+  key: string;
+  label: string;
+  value: number;
+  unit?: string;
+  format?: 'number' | 'currency';
+  currency?: string;
+}
+
+export interface PluginQuotaState extends AntigravityQuotaState {
+  summary: PluginQuotaMetric[];
+}
+
 /** Status of an on-demand snapshot poll; the data itself lives in the snapshot store. */
 export interface SnapshotPollState {
   status: 'idle' | 'loading' | 'error';
@@ -84,6 +98,20 @@ export interface SnapshotPollState {
   /** When the click failed; a listing snapshot from after it replaces the error. */
   failedAtMs?: number;
 }
+
+/**
+ * Session knowledge of the account-level "use credits after the usage limit" setting.
+ * This feature records confirmed writes; an absent entry means the value is unknown.
+ */
+export type CodexCreditOverageEntry =
+  | { status: 'writing'; target: boolean }
+  | { status: 'known'; value: boolean; at: number }
+  | { status: 'unconfirmed'; target: boolean; at: number };
+
+/** Account-wide mutex and unresolved-write journal, separate from user snapshots. */
+export type CodexCreditOverageOperation =
+  | { status: 'writing'; target: boolean; unconfirmed: boolean }
+  | { status: 'unconfirmed'; target: boolean; at: number };
 
 export interface DevinQuotaWindow {
   id: 'daily' | 'weekly';
@@ -201,6 +229,8 @@ export interface KimiQuotaRow {
 export interface KimiQuotaState {
   status: 'idle' | 'loading' | 'success' | 'error';
   rows: KimiQuotaRow[];
+  /** Official user_level_name from /me; absent for unavailable account information. */
+  planName?: string | null;
   error?: string;
   errorStatus?: number;
 }

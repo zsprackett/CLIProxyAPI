@@ -21,7 +21,8 @@ import { hasDisableAllModelsRule } from '@/components/providers/utils';
 import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types';
 import type { ModelInfo } from '@/utils/models';
 import { PROVIDER_DESCRIPTORS } from '../../descriptors';
-import { mergeDiscoveredModels } from '../../modelEntries';
+import { removeModelAt } from '../../modelEntries';
+import { syncDiscoveredModels } from '../../discoverySelection';
 import type {
   ApiKeyEntryInput,
   ModelEntryInput,
@@ -135,7 +136,6 @@ function buildInitialForm(
             name: m.name,
             alias: m.alias ?? '',
             priority: m.priority,
-            testModel: m.testModel,
             image: m.image === true,
             thinkingJson: formatJsonObject(m.thinking),
             ...readModelOptions(m),
@@ -145,7 +145,7 @@ function buildInitialForm(
         ? Object.entries(cfg.headers).map(([k, v]) => ({ key: k, value: String(v) }))
         : [emptyHeader()],
       excludedModelsText: '',
-      testModel: cfg.testModel ?? '',
+      testModel: '',
       apiKeyEntries: cfg.apiKeyEntries?.length
         ? cfg.apiKeyEntries.map((entry) => ({
             apiKey: '',
@@ -184,7 +184,6 @@ function buildInitialForm(
           name: m.name,
           alias: m.alias ?? '',
           priority: m.priority,
-          testModel: m.testModel,
           thinkingJson: formatJsonObject(m.thinking),
           ...readModelOptions(m),
         }))
@@ -346,9 +345,8 @@ export function BaseProviderForm({
     setDiscoveryOpen(false);
   };
 
-  const applyDiscoveredModels = (incoming: ModelInfo[]) => {
-    if (!incoming.length) return;
-    setForm((prev) => ({ ...prev, models: mergeDiscoveredModels(prev.models, incoming) }));
+  const applyDiscoveredModels = (picked: ModelInfo[], catalog: ModelInfo[]) => {
+    setForm((prev) => ({ ...prev, models: syncDiscoveredModels(prev.models, picked, catalog) }));
   };
 
   const updateField = <K extends keyof ProviderEntryFormInput>(
@@ -492,10 +490,7 @@ export function BaseProviderForm({
   };
 
   const removeModelEntry = (idx: number) => {
-    updateField(
-      'models',
-      modelsList.filter((_, i) => i !== idx)
-    );
+    updateField('models', removeModelAt(modelsList, idx));
   };
 
   return (
@@ -663,17 +658,7 @@ export function BaseProviderForm({
           <div className={styles.field}>
             <label className={styles.label} htmlFor={`${fid}-testModel`}>
               {t('providersPage.form.testModel')}
-              {brand === 'codex' ||
-              brand === 'meta' ||
-              brand === 'xai' ||
-              isClaudeLikeBrand(brand) ||
-              brand === 'gemini' ||
-              brand === 'interactions' ? (
-                <span className={styles.labelHint}>
-                  {' '}
-                  · {t('providersPage.form.testModelClaudeHint')}
-                </span>
-              ) : null}
+              <span className={styles.labelHint}> · {t('providersPage.form.testModelHint')}</span>
             </label>
             <Select
               id={`${fid}-testModel`}
@@ -884,9 +869,7 @@ export function BaseProviderForm({
                 hasFetched={discovery.hasFetched}
                 existingNames={existingModelNames}
                 mutating={mutating}
-                onApply={(names) => {
-                  applyDiscoveredModels(names);
-                }}
+                onApply={applyDiscoveredModels}
                 onReload={() => void discovery.fetch()}
                 onClose={closeDiscovery}
               />
@@ -897,7 +880,7 @@ export function BaseProviderForm({
               supportsImage={supportsModelImage}
               supportsThinking
               mutating={mutating}
-              removeDisabled={modelsList.length <= 1}
+              removeDisabled={false}
               onUpdate={updateModelEntry}
               onAdd={() => updateField('models', [...modelsList, emptyModel()])}
               onRemove={removeModelEntry}

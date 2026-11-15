@@ -67,12 +67,12 @@ describe('Claude card from the Go golden snapshot', () => {
   test('shows the plan and each window with its remaining percent', () => {
     const markup = render(golden('claude'));
     expect(markup).toContain(
-      '<span class="codexPlanLabel">Plan</span><span class="codexPlanValue">Max</span>'
+      '<span class="codexPlanLabel">Plan</span><span class="premiumPlanValue">Max</span>'
     );
     expect(windowRows(markup)).toEqual([
       ['5-hour limit', '75%'],
-      ['7-day limit', '40%'],
-      ['7-day Fable 5', 'Unknown'],
+      ['Weekly limit', '40%'],
+      ['Weekly Fable 5 limit', 'Unknown'],
     ]);
     expect(markup).not.toContain('Extra Usage');
   });
@@ -117,7 +117,7 @@ describe('Claude card from the Go golden snapshot', () => {
 describe('Codex card from a contract-shaped snapshot', () => {
   test('shows the plan, credits, renewal, and reset-credit count', () => {
     const markup = render(codexSnapshot(), CODEX_NOW);
-    expect(markup).toContain('<span class="elitePlanValue">Pro 20x</span>');
+    expect(markup).toContain('<span class="premiumPlanValue">Pro 200</span>');
     expect(markup).toContain(
       '<span class="codexPlanLabel">Credit balance</span><span class="codexPlanValue">125</span>'
     );
@@ -207,7 +207,7 @@ describe('Codex card from a contract-shaped snapshot', () => {
   });
 
   test.each(['en', 'zh-CN', 'zh-TW', 'ru'])(
-    'renders Business Premium with its premium badge in %s',
+    'renders Business Premium as a plain plan in %s',
     async (language) => {
       await i18n.changeLanguage(language);
       const snapshot = withExtras(codexSnapshot(), {
@@ -219,7 +219,7 @@ describe('Codex card from a contract-shaped snapshot', () => {
         },
       } as Partial<QuotaExtras>);
       const markup = render(snapshot, CODEX_NOW);
-      expect(markup).toContain('<span class="premiumPlanValue">Business Premium</span>');
+      expect(markup).toContain('<span class="codexPlanValue">Business Premium</span>');
       expect(markup).not.toContain('self_serve_business_prolite');
     }
   );
@@ -231,7 +231,7 @@ describe.skipIf(!existsSync(goldenPath('codex')))('Codex card from the Go golden
 
   test('shows the plan, credits, and reset-credit count', () => {
     const markup = render(golden('codex'), beforeEveryReset);
-    expect(markup).toContain('<span class="elitePlanValue">Pro 20x</span>');
+    expect(markup).toContain('<span class="premiumPlanValue">Pro 200</span>');
     expect(markup).toContain(
       '<span class="codexPlanLabel">Credit balance</span><span class="codexPlanValue">42.50</span>'
     );

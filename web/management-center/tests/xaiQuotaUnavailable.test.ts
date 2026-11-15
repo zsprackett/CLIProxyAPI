@@ -112,13 +112,13 @@ describe('XaiQuotaBody unavailable weekly usage', () => {
     expect(markup).not.toContain('$0.00 / $0.00');
   });
 
-  test('reads an omitted percentage inside the active period as Used 0%', () => {
+  test('reads an omitted percentage inside the active period as 100% remaining', () => {
     const quota = quotaFor(weeklyConfig(), monthlyConfig(), IN_PERIOD_MS);
     expect(quota.billing?.usagePercent).toBe(0);
 
     const markup = render(quota);
 
-    expect(markup).toContain('Used 0%');
+    expect(markup).toContain('class="quotaPercent">100%</span>');
     expect(markup).not.toContain('Usage unavailable from xAI');
   });
 
@@ -142,18 +142,28 @@ describe('XaiQuotaBody unavailable weekly usage', () => {
     expect(markup).not.toContain('Used 0%');
   });
 
-  test('renders an explicit zero percent as Used 0%', () => {
+  test('renders zero usage as 100% remaining', () => {
     const markup = render(quotaFor(weeklyConfig({ creditUsagePercent: 0 }), monthlyConfig()));
 
-    expect(markup).toContain('Used 0%');
+    expect(markup).toContain('class="quotaPercent">100%</span>');
+    expect(markup).not.toContain('Used 0%');
     expect(markup).not.toContain('Usage unavailable from xAI');
   });
 
-  test('renders an explicit percent as Used 37%', () => {
+  test('renders 37% usage as 63% remaining', () => {
     const markup = render(quotaFor(weeklyConfig({ creditUsagePercent: 37 }), monthlyConfig()));
 
-    expect(markup).toContain('Used 37%');
+    expect(markup).toContain('class="quotaPercent">63%</span>');
+    expect(markup).toContain('width:63%');
+    expect(markup).not.toContain('Used 37%');
     expect(markup).not.toContain('Usage unavailable from xAI');
+  });
+
+  test.each([100, 120])('renders exhausted usage %i as 0% remaining', (percent) => {
+    const markup = render(quotaFor(weeklyConfig({ creditUsagePercent: percent }), monthlyConfig()));
+
+    expect(markup).toContain('class="quotaPercent">0%</span>');
+    expect(markup).toContain('width:0%');
   });
 
   test.each([0, 3000])('does not use monthly spending %i as weekly usage', (used) => {
@@ -180,7 +190,7 @@ describe('XaiQuotaBody unavailable weekly usage', () => {
 
     expect(quota.billing?.usagePercent).toBe(percent);
     expect(quota.billing?.usedPercent).toBe(20);
-    expect(render(quota)).toContain(`Used ${percent}%`);
+    expect(render(quota)).toContain(`class="quotaPercent">${100 - percent}%</span>`);
   });
 
   test('preserves monthly-only usage', () => {
@@ -228,6 +238,49 @@ describe('XaiQuotaBody unavailable weekly usage', () => {
     expect(markup).toContain('$0.00 / $0.00');
   });
 
+  test('renders product contributions as text with only one shared weekly meter', () => {
+    const markup = render(
+      quotaFor(
+        weeklyConfig({
+          creditUsagePercent: 16,
+          productUsage: [
+            { product: 'GrokBuild', usagePercent: 14 },
+            { product: 'GrokChat', usagePercent: 2 },
+          ],
+        }),
+        monthlyConfig()
+      )
+    );
+
+    expect(markup).toContain('class="quotaPercent">84%</span>');
+    expect(markup).toContain('Usage breakdown (shared quota)');
+    expect(markup).toContain('GrokBuild usage: 14%');
+    expect(markup).toContain('GrokChat usage: 2%');
+    expect(markup).toContain('width:84%');
+    expect(markup.match(/class="quotaRow"/g)).toHaveLength(1);
+    expect(markup).not.toContain('width:86%');
+    expect(markup).not.toContain('width:98%');
+  });
+
+  test('does not derive a weekly total or product remainder from partial usage', () => {
+    const markup = render(
+      quotaFor(
+        weeklyConfig({
+          productUsage: [
+            { product: 'GrokBuild', usagePercent: 14 },
+            { product: 'GrokChat', usagePercent: null },
+          ],
+        }),
+        monthlyConfig()
+      )
+    );
+
+    expect(markup).toContain('GrokBuild usage: 14%');
+    expect(markup).toContain('GrokChat usage: Usage unavailable from xAI');
+    expect(markup).not.toContain('width:');
+    expect(markup).not.toContain('Used 14%');
+  });
+
   test('keeps monthly amount, percentage, and meter in the remaining direction', () => {
     const markup = render(
       quotaFor(
@@ -242,6 +295,34 @@ describe('XaiQuotaBody unavailable weekly usage', () => {
     expect(markup).toContain('$135.00 / $150.00');
     expect(markup).not.toContain('$15.00 / $150.00');
     expect(markup).toContain('width:90%');
+  });
+
+  test('places disabled pay-as-you-go in the plan row above weekly quota', () => {
+    const markup = render(quotaFor(weeklyConfig({ creditUsagePercent: 37 }), monthlyConfig()));
+    const label = i18n.t('xai_quota.pay_as_you_go_label');
+    const disabled = i18n.t('xai_quota.pay_as_you_go_disabled');
+
+    expect(markup).toContain(
+      `<span class="codexPlanItem"><span class="codexPlanLabel">${label}</span><span class="codexPlanValue">${disabled}</span></span>`
+    );
+    expect(markup.indexOf(label)).toBeLessThan(markup.indexOf('class="quotaRow"'));
+    expect(markup.split(label)).toHaveLength(2);
+  });
+
+  test('keeps enabled pay-as-you-go below weekly quota with its meter', () => {
+    const markup = render(
+      quotaFor(
+        weeklyConfig({ creditUsagePercent: 37, onDemandCap: { val: 10000 } }),
+        monthlyConfig({ onDemandCap: { val: 10000 }, onDemandUsed: { val: 2500 } })
+      )
+    );
+    const label = i18n.t('xai_quota.pay_as_you_go_label');
+
+    expect(markup).toContain(`<span class="quotaModel">${label}</span>`);
+    expect(markup.indexOf(label)).toBeGreaterThan(markup.indexOf('class="quotaRow"'));
+    expect(markup).not.toContain(i18n.t('xai_quota.pay_as_you_go_disabled'));
+    expect(markup).toContain('width:75%');
+    expect(markup.split(label)).toHaveLength(2);
   });
 
   test('keeps the monthly-only zero row when no weekly data exists', () => {

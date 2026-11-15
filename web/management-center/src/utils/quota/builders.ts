@@ -43,6 +43,15 @@ function getAntigravityWindowOrder(bucket: AntigravityQuotaBucket): number {
   return ANTIGRAVITY_BUCKET_WINDOW_ORDER.get(window) ?? Number.MAX_SAFE_INTEGER;
 }
 
+export function compareAntigravityQuotaBuckets(
+  a: AntigravityQuotaBucket,
+  b: AntigravityQuotaBucket
+): number {
+  const orderDiff = getAntigravityWindowOrder(a) - getAntigravityWindowOrder(b);
+  if (orderDiff !== 0) return orderDiff;
+  return a.label.localeCompare(b.label);
+}
+
 /**
  * Window length in hours for an Antigravity bucket.
  *
@@ -86,8 +95,12 @@ export function buildAntigravityQuotaGroups(
           const window = normalizeStringValue(bucket.window) ?? undefined;
           const rawId =
             normalizeStringValue(bucket.bucketId ?? bucket.bucket_id) ??
-            `${groupId}-${window ?? `bucket-${bucketIndex + 1}`}`;
-          const label = normalizeStringValue(bucket.displayName ?? bucket.display_name) ?? rawId;
+            `${groupId}-${window ?? 'bucket'}-${bucketIndex + 1}`;
+          const label =
+            normalizeStringValue(bucket.displayName ?? bucket.display_name) ??
+            normalizeStringValue(bucket.description) ??
+            window ??
+            rawId;
 
           const resetTime =
             normalizeStringValue(bucket.resetTime ?? bucket.reset_time) ?? undefined;
@@ -104,11 +117,7 @@ export function buildAntigravityQuotaGroups(
           };
         })
         .filter((bucket): bucket is AntigravityQuotaBucket => bucket !== null)
-        .sort((a, b) => {
-          const orderDiff = getAntigravityWindowOrder(a) - getAntigravityWindowOrder(b);
-          if (orderDiff !== 0) return orderDiff;
-          return a.label.localeCompare(b.label);
-        });
+        .sort(compareAntigravityQuotaBuckets);
 
       if (parsedBuckets.length === 0) return null;
 

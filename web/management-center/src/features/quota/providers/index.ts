@@ -22,6 +22,8 @@ import { META_CONFIG } from './meta/data';
 import { MetaQuotaBody } from './meta/MetaQuotaBody';
 import { KIMI_CONFIG } from './kimi/data';
 import { KimiQuotaBody } from './kimi/KimiQuotaBody';
+import { PLUGIN_CONFIG } from './plugin/data';
+import { PluginQuotaBody } from './plugin/PluginQuotaBody';
 import { CLAUDE_CONFIG, CODEX_CONFIG } from './snapshotPoll';
 import { XAI_CONFIG } from './xai/data';
 import { XaiQuotaBody } from './xai/XaiQuotaBody';
@@ -70,6 +72,7 @@ export const QUOTA_ADAPTERS: Record<QuotaProviderType, QuotaAdapter> = {
   devin: withFetchedAt({ ...DEVIN_CONFIG, Body: DevinQuotaBody } as unknown as QuotaAdapter),
   kimi: withFetchedAt({ ...KIMI_CONFIG, Body: KimiQuotaBody } as unknown as QuotaAdapter),
   meta: withFetchedAt({ ...META_CONFIG, Body: MetaQuotaBody } as unknown as QuotaAdapter),
+  plugin: withFetchedAt({ ...PLUGIN_CONFIG, Body: PluginQuotaBody } as unknown as QuotaAdapter),
   xai: withFetchedAt({ ...XAI_CONFIG, Body: XaiQuotaBody } as unknown as QuotaAdapter),
 };
 

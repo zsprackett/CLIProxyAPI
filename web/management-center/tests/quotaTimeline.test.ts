@@ -187,6 +187,44 @@ describe('projectLane', () => {
     expect(live).toBeDefined();
     expect(live?.startMs).toBe(at(2026, 6, 29, 20));
     expect(live?.remaining).toBeNull();
+    expect(live?.usedFillPercent).toBeNull();
+  });
+
+  test('measures used fill on the full window after the week clips its start', () => {
+    // Sunday 2026-10-25 opens a new fortnight. A 7-day window that began
+    // Wednesday is cut off on the left; 76% remaining means only 24% was used,
+    // and that usage ended before Sunday.
+    const reset = at(2026, 9, 29, 16, 44);
+    const now = at(2026, 9, 25, 12);
+    const sunday = timelineSpan('weekly', 0, now);
+    const previous = timelineSpan('weekly', -1, now);
+    const current = lane({ anchorMs: reset, periodHours: 24 * 7, remaining: 76 });
+
+    const clipped = projectLane(current, sunday.startMs, sunday.endMs, now, 'weekly').find(
+      (window) => window.state === 'live'
+    );
+    const whole = projectLane(current, previous.startMs, previous.endMs, now, 'weekly').find(
+      (window) => window.state === 'live'
+    );
+
+    expect(clipped?.startMs).toBeLessThan(sunday.startMs);
+    expect(clipped?.usedFillPercent).toBe(0);
+    expect(whole?.startMs).toBeGreaterThanOrEqual(previous.startMs);
+    expect(whole?.usedFillPercent).toBe(24);
+
+    const partial = projectLane(
+      lane({ anchorMs: reset, periodHours: 24 * 7, remaining: 40 }),
+      sunday.startMs,
+      sunday.endMs,
+      now,
+      'weekly'
+    ).find((window) => window.state === 'live');
+    const start = reset - 7 * DAY_MS;
+    const usedEnd = start + 0.6 * (reset - start);
+    const expected = ((usedEnd - sunday.startMs) / (reset - sunday.startMs)) * 100;
+
+    expect(partial?.usedFillPercent).toBeCloseTo(expected, 5);
+    expect(partial?.usedFillPercent ?? 100).toBeLessThan(60);
   });
 
   test('clips bars to the visible span', () => {
@@ -351,6 +389,39 @@ describe('buildTimelineLane', () => {
     expect(lane.remaining).toBe(30);
   });
 
+  test('claude: keeps the weekly lane on the 7-day limit instead of a model limit', () => {
+    const accountReset = at(2026, 7, 1, 20);
+    // Same period, reset stamp a few seconds earlier: must not win the lane.
+    const fableReset = accountReset - 5_000;
+    const fable = snapWindow('seven_day_fable', 'claude:7d_oi', 0, fableReset, 168);
+    const snapshot = laneSnapshot('claude', [
+      snapWindow('five_hour', 'claude:5h', 10, at(2026, 6, 29, 20), 5),
+      snapWindow('seven_day', 'claude:7d', 100, accountReset, 168),
+      { ...fable, model_scope: 'fable' },
+    ]);
+
+    const weekly = buildTimelineLane({
+      ...base,
+      provider: 'claude',
+      quota: undefined,
+      snapshot,
+      maxPeriodHours: 14 * 24,
+    });
+    expect(weekly.anchorMs).toBe(accountReset);
+    expect(weekly.periodHours).toBe(168);
+    expect(weekly.remaining).toBe(0);
+
+    const session = buildTimelineLane({
+      ...base,
+      provider: 'claude',
+      quota: undefined,
+      snapshot,
+      maxPeriodHours: 5,
+    });
+    expect(session.periodHours).toBe(5);
+    expect(session.remaining).toBe(90);
+  });
+
   test('codex: includes available reset credits with parseable expiry dates', () => {
     const expiresAt = '2026-08-02T12:00:00Z';
     const lane = buildTimelineLane({
@@ -452,7 +523,7 @@ describe('buildTimelineLane', () => {
     expect(lane.limits).toEqual([]);
   });
 
-  test('xai anchors on the weekly limit, with per-product limits', () => {
+  test('xai anchors on the shared weekly limit without independent product limits', () => {
     const lane = buildTimelineLane({
       ...base,
       provider: 'xai',
@@ -474,8 +545,8 @@ describe('buildTimelineLane', () => {
     expect(lane.anchorMs).toBe(9000);
     expect(lane.periodHours).toBe(168);
     expect(lane.remaining).toBe(95);
-    // GrokChat has no percentage, so it is not summarized.
-    expect(lane.limits).toEqual([{ label: 'GrokBuild', remaining: 95 }]);
+    // Product usage is a contribution to the total, not a separate quota pool.
+    expect(lane.limits).toEqual([]);
   });
 
   test('xai without a weekly limit produces no window at all', () => {

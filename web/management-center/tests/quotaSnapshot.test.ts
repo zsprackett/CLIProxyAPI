@@ -107,8 +107,8 @@ describe('Go golden snapshot', () => {
   test('renders the labels, percents, and unknown Fable window', () => {
     const markup = render(golden);
     expect(markup).toContain('5-hour limit');
-    expect(markup).toContain('7-day limit');
-    expect(markup).toContain('7-day Fable 5');
+    expect(markup).toContain('Weekly limit');
+    expect(markup).toContain('Weekly Fable 5 limit');
     expect(markup).toContain('75%');
     expect(markup).toContain('40%');
     expect(markup).toContain('Unknown');
@@ -330,7 +330,7 @@ describe('stale and exhausted windows', () => {
     };
     expect(renderedWindows(render(claude))).toEqual([
       { label: '5-hour limit', percent: 'Reset, awaiting data', limitReached: false },
-      { label: '7-day limit', percent: '100%', limitReached: false },
+      { label: 'Weekly limit', percent: '100%', limitReached: false },
     ]);
 
     const live = {

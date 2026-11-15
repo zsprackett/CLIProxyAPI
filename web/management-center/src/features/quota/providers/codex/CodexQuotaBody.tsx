@@ -1,14 +1,16 @@
 /**
- * Codex quota body: plan chip (elite = Pro 20x liquid platinum, premium = gold),
- * renewal, credits, the manual reset credits, then the snapshot windows.
+ * Codex quota body: plan chip (tier in cardTier.ts), renewal, credits, host slots,
+ * the manual reset credits, then the snapshot windows.
  */
 
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   normalizePlanType,
-  resolvePlanTier,
-  PREMIUM_CODEX_PLAN_TYPES,
+  BUSINESS_PREMIUM_CODEX_PLAN_TYPE,
+  PRO_CODEX_PLAN_TYPE,
+  PRO_LITE_CODEX_PLAN_TYPES,
+  PRO_MAX_CODEX_PLAN_TYPES,
   buildResetDisplay,
   formatInstantShort,
   parseIsoToMs,
@@ -16,18 +18,18 @@ import {
 import { resolveTimeZoneLabel } from '@/utils/time/timezone';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId, resetCreditRowId } from '../../resetSchedule';
+import { planValueClassForTier, resolveCodexCardTier } from '../../cardTier';
 import { WindowList } from '../../snapshot/WindowList';
-import type { QuotaClassMap, SnapshotBodyProps } from '../../types';
+import type { SnapshotBodyProps } from '../../types';
 
-const getPlanValueClass = (planType: string | null, classes: QuotaClassMap): string => {
-  // tests/quotaPlanTier.test.ts pins the elite/premium order of resolvePlanTier.
-  const tier = resolvePlanTier(planType);
-  if (tier === 'elite') return classes.elitePlanValue;
-  if (tier === 'premium') return classes.premiumPlanValue;
-  return classes.codexPlanValue;
-};
-
-export function CodexQuotaBody({ snapshot, extras, classes, nowMs }: SnapshotBodyProps<'codex'>) {
+export function CodexQuotaBody({
+  snapshot,
+  extras,
+  classes,
+  nowMs,
+  planItems,
+  afterPlan,
+}: SnapshotBodyProps<'codex'>) {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage;
   // Windows and reset credits compete for the same emphasis, but only during
@@ -49,11 +51,12 @@ export function CodexQuotaBody({ snapshot, extras, classes, nowMs }: SnapshotBod
   const getPlanLabel = (pt: string | null): string | null => {
     const normalized = normalizePlanType(pt);
     if (!normalized) return null;
-    if (normalized === 'self_serve_business_prolite') {
+    if (normalized === BUSINESS_PREMIUM_CODEX_PLAN_TYPE) {
       return t('codex_quota.plan_business_premium');
     }
-    if (normalized === 'pro') return t('codex_quota.plan_pro');
-    if (PREMIUM_CODEX_PLAN_TYPES.has(normalized)) return t('codex_quota.plan_prolite');
+    if (PRO_MAX_CODEX_PLAN_TYPES.has(normalized)) return t('codex_quota.plan_promax');
+    if (normalized === PRO_CODEX_PLAN_TYPE) return t('codex_quota.plan_pro');
+    if (PRO_LITE_CODEX_PLAN_TYPES.has(normalized)) return t('codex_quota.plan_prolite');
     if (normalized === 'plus') return t('codex_quota.plan_plus');
     if (normalized === 'team') return t('codex_quota.plan_team');
     if (normalized === 'free') return t('codex_quota.plan_free');
@@ -61,7 +64,7 @@ export function CodexQuotaBody({ snapshot, extras, classes, nowMs }: SnapshotBod
   };
 
   const planLabel = getPlanLabel(planType);
-  const planValueClass = getPlanValueClass(planType, classes);
+  const planValueClass = planValueClassForTier(resolveCodexCardTier(planType), classes);
   const activeUntilMs = parseIsoToMs(activeUntil);
   const expiryDisplay = activeUntil
     ? buildResetDisplay(activeUntilMs === null ? activeUntil : null, activeUntilMs, nowMs, locale)
@@ -73,10 +76,11 @@ export function CodexQuotaBody({ snapshot, extras, classes, nowMs }: SnapshotBod
         expiryDisplay ||
         creditsUnlimited ||
         creditBalance !== null ||
-        resetCreditsCount !== null) && (
+        resetCreditsCount !== null ||
+        planItems) && (
         <div className={classes.codexPlan}>
           {planLabel && (
-            <span className={classes.codexPlanItem}>
+            <span className={classes.codexPlanItem} data-quota-plan="">
               <span className={classes.codexPlanLabel}>{t('codex_quota.plan_label')}</span>
               <span className={planValueClass}>{planLabel}</span>
             </span>
@@ -106,8 +110,10 @@ export function CodexQuotaBody({ snapshot, extras, classes, nowMs }: SnapshotBod
               <span className={classes.codexPlanValue}>{resetCreditsCount.toString()}</span>
             </span>
           )}
+          {planItems}
         </div>
       )}
+      {afterPlan}
       {resetCreditList.length > 0 ? (
         <div className={classes.codexResetCredits}>
           <div className={classes.codexResetCreditsTitle}>

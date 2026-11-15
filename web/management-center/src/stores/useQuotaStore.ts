@@ -17,7 +17,10 @@ import type {
   DevinQuotaState,
   KimiQuotaState,
   MetaQuotaState,
+  PluginQuotaState,
   SnapshotPollState,
+  CodexCreditOverageEntry,
+  CodexCreditOverageOperation,
   XaiQuotaState,
 } from '@/types';
 
@@ -27,18 +30,33 @@ interface QuotaStoreState {
   cacheGeneration: number;
   fileGenerations: Record<string, number>;
   antigravityQuota: Record<string, AntigravityQuotaState>;
+  /**
+   * Account-level, keyed by codexCreditOverageKey(). Survives per-file invalidation
+   * because removing one credential does not change the account setting.
+   */
+  codexCreditOverage: Record<string, CodexCreditOverageEntry>;
+  /** A quota refresh must not release a pending or ambiguous mutation; auth resets it. */
+  codexCreditOverageOperations: Record<string, CodexCreditOverageOperation>;
   devinQuota: Record<string, DevinQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
   metaQuota: Record<string, MetaQuotaState>;
+  pluginQuota: Record<string, PluginQuotaState>;
   xaiQuota: Record<string, XaiQuotaState>;
   /** On-demand poll results by auth index; the listing snapshot wins once it is as new. */
   quotaSnapshots: Record<string, PolledQuotaSnapshot>;
   /** Loading and error of the last on-demand poll, by quota cache key. */
   quotaPolls: Record<string, SnapshotPollState>;
+  setCodexCreditOverage: (key: string, entry: CodexCreditOverageEntry | undefined) => void;
+  setCodexCreditOverageOperation: (
+    accountId: string,
+    operation: CodexCreditOverageOperation | undefined
+  ) => void;
+  clearCodexCreditOverageOperations: () => void;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
   setDevinQuota: (updater: QuotaUpdater<Record<string, DevinQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setMetaQuota: (updater: QuotaUpdater<Record<string, MetaQuotaState>>) => void;
+  setPluginQuota: (updater: QuotaUpdater<Record<string, PluginQuotaState>>) => void;
   setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
   setQuotaSnapshot: (authIndex: string, name: string, snapshot: QuotaSnapshot) => void;
   /**
@@ -61,12 +79,37 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
   cacheGeneration: 0,
   fileGenerations: {},
   antigravityQuota: {},
+  codexCreditOverage: {},
+  codexCreditOverageOperations: {},
   devinQuota: {},
   kimiQuota: {},
   metaQuota: {},
+  pluginQuota: {},
   xaiQuota: {},
   quotaSnapshots: {},
   quotaPolls: {},
+  setCodexCreditOverage: (key, entry) =>
+    set((state) => {
+      if (state.codexCreditOverage[key] === entry) return state;
+      const codexCreditOverage = { ...state.codexCreditOverage };
+      if (entry) {
+        codexCreditOverage[key] = entry;
+      } else {
+        delete codexCreditOverage[key];
+      }
+      return { codexCreditOverage };
+    }),
+  setCodexCreditOverageOperation: (accountId, operation) =>
+    set((state) => {
+      const codexCreditOverageOperations = { ...state.codexCreditOverageOperations };
+      if (operation) {
+        codexCreditOverageOperations[accountId] = operation;
+      } else {
+        delete codexCreditOverageOperations[accountId];
+      }
+      return { codexCreditOverageOperations };
+    }),
+  clearCodexCreditOverageOperations: () => set({ codexCreditOverageOperations: {} }),
   setAntigravityQuota: (updater) =>
     set((state) => ({
       antigravityQuota: resolveUpdater(updater, state.antigravityQuota),
@@ -81,6 +124,10 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     })),
   setMetaQuota: (updater) =>
     set((state) => ({ metaQuota: resolveUpdater(updater, state.metaQuota) })),
+  setPluginQuota: (updater) =>
+    set((state) => ({
+      pluginQuota: resolveUpdater(updater, state.pluginQuota),
+    })),
   setXaiQuota: (updater) =>
     set((state) => ({
       xaiQuota: resolveUpdater(updater, state.xaiQuota),
@@ -142,6 +189,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
           devinQuota: omitNames(state.devinQuota),
           kimiQuota: omitNames(state.kimiQuota),
           metaQuota: omitNames(state.metaQuota),
+          pluginQuota: omitNames(state.pluginQuota),
           xaiQuota: omitNames(state.xaiQuota),
           quotaSnapshots: omitNames(state.quotaSnapshots, (_authIndex, polled) => polled.name),
           quotaPolls: omitNames(state.quotaPolls),
@@ -151,9 +199,11 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         cacheGeneration: state.cacheGeneration + 1,
         fileGenerations: {},
         antigravityQuota: {},
+        codexCreditOverage: {},
         devinQuota: {},
         kimiQuota: {},
         metaQuota: {},
+        pluginQuota: {},
         xaiQuota: {},
         quotaSnapshots: {},
         quotaPolls: {},
