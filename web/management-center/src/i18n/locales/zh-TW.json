@@ -2898,5 +2898,16 @@
     "error": "綁定失敗，請重新開始。",
     "unsupported": "目前後端不支援 SIWC 綁定。",
     "expired": "綁定工作階段已過期，請重新開始。"
+  },
+  "auth_reauth": {
+    "button": "重新登入",
+    "button_aria": "重新登入 {{name}}",
+    "required_hint": "此憑證需要重新登入。",
+    "suggested_hint": "權杖續期持續失敗，重新登入通常可以解決。",
+    "dialog_title": "重新登入 {{name}}",
+    "success_title": "已重新登入",
+    "success_hint": "憑證已原地更新，原有設定皆已保留。",
+    "success_warning_title": "已登入，但此憑證需要處理：",
+    "success_warning_hint": "新的登入已儲存。請在驗證檔案頁面檢查此憑證。"
   }
 }

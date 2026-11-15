@@ -147,7 +147,7 @@
   border-radius: 8px;
   padding: 7px 9px;
 
-  span {
+  > span {
     min-width: 0;
     overflow-wrap: anywhere;
     @include text-ellipsis-multiline(2);
@@ -157,6 +157,15 @@
 .warningIcon {
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.warningText {
+  flex: 1;
+}
+
+.warningAction {
+  flex-shrink: 0;
+  align-self: center;
 }
 
 /* ---------- 健康区：eyebrow + 计数 + 状态条 ---------- */

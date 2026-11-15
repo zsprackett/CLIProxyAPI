@@ -7,7 +7,7 @@ import { useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconChevronDown, IconRefreshCw } from '@/components/ui/icons';
 import { useNow } from '@/hooks/useNow';
-import type { ResolvedTheme } from '@/types';
+import type { AuthFileItem, ResolvedTheme } from '@/types';
 import { resolveQuotaErrorMessage } from '@/utils/quota';
 import { getQuotaDisplayName } from '@/utils/quota/identity';
 import {
@@ -16,6 +16,8 @@ import {
   getTypeLabel,
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
+import { reauthNeed } from '@/features/authFiles/reauth';
+import { ReauthButton } from '@/features/authFiles/components/ReauthButton';
 import { bindQuotaClasses } from '../types';
 import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import { isQuotaRefreshDisabled, type QuotaFileEntry } from '../logic';
@@ -55,6 +57,8 @@ export type QuotaCardProps = {
   creditOverageSharedCount?: number;
   onRefresh: () => void;
   onReset: () => void;
+  /** Opens the page's targeted sign-in dialog; absent hides the strip. */
+  onReauth?: (file: AuthFileItem, name: string) => void;
 };
 
 export function QuotaCard(props: QuotaCardProps) {
@@ -71,6 +75,7 @@ export function QuotaCard(props: QuotaCardProps) {
     creditOverageSharedCount = 1,
     onRefresh,
     onReset,
+    onReauth,
   } = props;
   const { t } = useTranslation();
   const nowMs = useNow();
@@ -78,6 +83,7 @@ export function QuotaCard(props: QuotaCardProps) {
   const file = entry.file;
   const fullName = getQuotaDisplayName(file);
   const displayName = showIdentity ? fullName : maskIdentity(fullName);
+  const reauth = onReauth ? reauthNeed(file) : null;
 
   // Capture the entrance delay only at mount, without a render-time ref read.
   const [mountEntranceDelayMs] = useState<number | null>(entranceDelayMs ?? null);
@@ -202,6 +208,24 @@ export function QuotaCard(props: QuotaCardProps) {
           </button>
         )}
       </header>
+
+      {reauth && onReauth && (
+        <div className={styles.reauthStrip} data-level={reauth.level}>
+          <span className={styles.reauthText}>
+            {t(
+              reauth.level === 'required'
+                ? 'auth_reauth.required_hint'
+                : 'auth_reauth.suggested_hint'
+            )}
+          </span>
+          <ReauthButton
+            need={reauth}
+            name={displayName}
+            disabled={!canRefresh}
+            onClick={() => onReauth(file, displayName)}
+          />
+        </div>
+      )}
 
       <div className={styles.body}>
         {status === 'idle' ? (

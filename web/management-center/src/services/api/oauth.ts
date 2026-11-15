@@ -44,6 +44,20 @@ export interface OAuthStartOptions {
    * only in a POST body; blank values keep the original GET request.
    */
   proxyUrl?: string;
+  /** Re-sign-in this credential in place; the backend rejects a different account. */
+  authIndex?: string;
+  /** Ask the backend to verify the targeted credential after the login. */
+  verify?: boolean;
+}
+
+export interface OAuthStatusResponse {
+  status: 'ok' | 'wait' | 'error';
+  error?: string;
+  auth_id?: string;
+  saved?: boolean;
+  adopted?: boolean;
+  adoption_error?: string;
+  verification_error?: string;
 }
 
 export interface SiwcBindResponse {
@@ -64,6 +78,11 @@ export const oauthApi = {
     if (WEBUI_SUPPORTED.has(providerKey)) {
       params.is_webui = true;
     }
+    const authIndex = options.authIndex?.trim();
+    if (authIndex) {
+      params.auth_index = authIndex;
+      if (options.verify) params.verify = true;
+    }
     const proxyUrl = options.proxyUrl?.trim();
     if (proxyUrl) {
       // The backend rejects proxy_url in the query string, so everything moves to the body.
@@ -80,7 +99,7 @@ export const oauthApi = {
   },
 
   getAuthStatus: (state: string, signal?: AbortSignal) =>
-    apiClient.get<{ status: 'ok' | 'wait' | 'error'; error?: string }>(`/oauth/status`, {
+    apiClient.get<OAuthStatusResponse>(`/oauth/status`, {
       params: { state },
       ...(signal ? { signal } : {}),
     }),

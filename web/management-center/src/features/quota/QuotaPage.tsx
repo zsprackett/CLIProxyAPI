@@ -81,6 +81,7 @@ import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
 import { readQuotaUiState, writeQuotaUiState } from './uiState';
+import { useCredentialReauth } from '@/features/authFiles/hooks/useCredentialReauth';
 import styles from './QuotaPage.module.scss';
 
 const TAB_IDS: string[] = ['all', ...QUOTA_TAB_ORDER];
@@ -163,6 +164,9 @@ export function QuotaPage() {
   );
 
   useHeaderRefresh(loadFiles);
+  const reauth = useCredentialReauth(
+    useCallback(() => void loadFiles({ background: true }), [loadFiles])
+  );
 
   useInterval(
     () => {
@@ -531,6 +535,7 @@ export function QuotaPage() {
         onToggleGlance={() => toggleExpandedCard(key)}
         onRefresh={() => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
         onReset={() => resetQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+        onReauth={reauth.start}
       />
     );
   };
@@ -734,6 +739,7 @@ export function QuotaPage() {
           resolvedTheme={resolvedTheme}
         />
       </section>
+      {reauth.dialog}
     </div>
   );
 }

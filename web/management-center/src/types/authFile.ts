@@ -81,7 +81,24 @@ export interface AuthFileItem {
   recentRequests?: RecentRequestBucket[];
   /** Absent on older servers. Never interpreted as credential health. */
   cooldownSnapshot?: AuthFileCooldownSnapshot;
+  /** v8 renewal state; absent on older servers. */
+  requiresSignIn?: boolean;
+  renewalState?: AuthFileRenewalState | string;
+  refreshError?: AuthFileRefreshError;
   [key: string]: unknown;
+}
+
+export type AuthFileRenewalState =
+  | 'sign_in_required'
+  | 'expired_sign_in_required'
+  | 'retry_scheduled'
+  | 'renewal_verified'
+  | 'awaiting_first_renewal';
+
+export interface AuthFileRefreshError {
+  code: string;
+  message?: string;
+  httpStatus?: number;
 }
 
 export interface AuthFilesResponse {

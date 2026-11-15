@@ -2878,5 +2878,16 @@
     "error": "바인딩에 실패했습니다. 다시 시작하세요.",
     "unsupported": "이 서버는 SIWC 바인딩을 지원하지 않습니다.",
     "expired": "바인딩 세션이 만료되었습니다. 다시 시작하세요."
+  },
+  "auth_reauth": {
+    "button": "다시 로그인",
+    "button_aria": "{{name}}에 다시 로그인",
+    "required_hint": "이 자격 증명은 다시 로그인해야 합니다.",
+    "suggested_hint": "토큰 갱신이 계속 실패합니다. 다시 로그인하면 대개 해결됩니다.",
+    "dialog_title": "{{name}}에 다시 로그인",
+    "success_title": "다시 로그인했습니다",
+    "success_hint": "자격 증명이 그 자리에서 업데이트되었고 기존 설정은 유지되었습니다.",
+    "success_warning_title": "로그인했지만 이 자격 증명에 확인이 필요합니다:",
+    "success_warning_hint": "새 로그인은 저장되었습니다. 인증 파일 페이지에서 이 자격 증명을 확인하세요."
   }
 }

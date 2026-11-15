@@ -2878,5 +2878,16 @@
     "error": "Binding failed. Please start over.",
     "unsupported": "This backend does not support SIWC binding.",
     "expired": "The binding session expired. Please start over."
+  },
+  "auth_reauth": {
+    "button": "Sign in again",
+    "button_aria": "Sign in again to {{name}}",
+    "required_hint": "This credential needs a new sign-in.",
+    "suggested_hint": "Token renewal keeps failing. A new sign-in usually fixes it.",
+    "dialog_title": "Sign in again to {{name}}",
+    "success_title": "Signed in again",
+    "success_hint": "The credential was updated in place. Its settings were kept.",
+    "success_warning_title": "Signed in, but the credential needs attention:",
+    "success_warning_hint": "The new sign-in was saved. Check this credential on the Auth Files page."
   }
 }
