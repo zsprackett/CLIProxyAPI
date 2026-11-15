@@ -48,6 +48,7 @@ import { buildModelRulesPath } from '@/features/authFiles/modelRules/useModelRul
 import type { ModelRulesKind } from '@/features/authFiles/modelRules/useModelRulesData';
 import { useAuthFilesPrefixProxyEditor } from '@/features/authFiles/hooks/useAuthFilesPrefixProxyEditor';
 import { useAuthFilesStatusBarCache } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
+import { useCredentialReauth } from '@/features/authFiles/hooks/useCredentialReauth';
 import {
   AUTH_FILES_CARD_LAYOUT_KEY,
   isAuthFilesStatusFilterMode,
@@ -170,6 +171,9 @@ export function AuthFilesPage() {
   } = useAuthFilesData({ onFilesMutated: invalidateDerivedCaches });
 
   const statusBarCache = useAuthFilesStatusBarCache(files);
+  const reauth = useCredentialReauth(
+    useCallback(() => void loadFiles({ background: true }).catch(() => {}), [loadFiles])
+  );
 
   const { excluded, excludedError, modelAlias, modelAliasError, loadExcluded, loadModelAlias } =
     useAuthFilesOauth();
@@ -600,6 +604,7 @@ export function AuthFilesPage() {
       onDelete={handleDelete}
       onToggleStatus={handleStatusToggle}
       onToggleSelect={toggleSelect}
+      onReauth={reauth.start}
     />
   );
 
@@ -802,6 +807,8 @@ export function AuthFilesPage() {
         onSave={handlePrefixProxySave}
         onChange={handlePrefixProxyChange}
       />
+
+      {reauth.dialog}
 
       <BatchActionBar
         selectionCount={selectionCount}

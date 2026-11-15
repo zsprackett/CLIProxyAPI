@@ -32,10 +32,12 @@ import {
 import { deriveAuthFileIdentity } from '@/features/authFiles/identity';
 import { resolveAuthFilePlan } from '@/features/authFiles/plan';
 import { resolveAuthFileQuotaType } from '@/features/authFiles/logic';
+import { reauthNeed } from '@/features/authFiles/reauth';
 import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
 import { AuthFileQuotaSection } from '@/features/authFiles/components/AuthFileQuotaSection';
 import { AuthFileCooldownSection } from './AuthFileCooldownSection';
 import { PlanBadge } from './PlanBadge';
+import { ReauthButton } from './ReauthButton';
 import { getSiwcBindingStatus, supportsSiwcBinding } from '@/features/oauth/siwcBinding';
 import { SiwcStatusBadge } from '@/features/oauth/components/SiwcStatusBadge';
 import styles from './AuthFileCard.module.scss';
@@ -62,6 +64,8 @@ export type AuthFileCardProps = {
   onDelete: (name: string) => void;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
   onToggleSelect: (name: string) => void;
+  /** Opens the page's targeted sign-in dialog; absent hides the button. */
+  onReauth?: (file: AuthFileItem, name: string) => void;
 };
 
 export function AuthFileCard(props: AuthFileCardProps) {
@@ -87,6 +91,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
     onDelete,
     onToggleStatus,
     onToggleSelect,
+    onReauth,
   } = props;
 
   const isRuntimeOnly = isRuntimeOnlyAuthFile(file);
@@ -111,6 +116,15 @@ export function AuthFileCard(props: AuthFileCardProps) {
 
   const rawStatusMessage = getAuthFileStatusMessage(file);
   const hasStatusWarning = hasAuthFileStatusWarning(file);
+  const reauth = onReauth ? reauthNeed(file) : null;
+  const bannerMessage =
+    rawStatusMessage && hasStatusWarning
+      ? rawStatusMessage
+      : reauth
+        ? t(
+            reauth.level === 'required' ? 'auth_reauth.required_hint' : 'auth_reauth.suggested_hint'
+          )
+        : '';
 
   const priorityValue = Number.isSafeInteger(file.priority) ? file.priority : undefined;
   const weightValue = Number.isSafeInteger(file.weight) ? file.weight : undefined;
@@ -187,10 +201,19 @@ export function AuthFileCard(props: AuthFileCardProps) {
         </p>
       )}
 
-      {rawStatusMessage && hasStatusWarning && (
-        <div className={styles.warning} title={rawStatusMessage}>
+      {bannerMessage && (
+        <div className={styles.warning} title={bannerMessage}>
           <IconInfo className={styles.warningIcon} size={14} />
-          <span>{rawStatusMessage}</span>
+          <span className={styles.warningText}>{bannerMessage}</span>
+          {reauth && onReauth && (
+            <ReauthButton
+              need={reauth}
+              name={identity.primary}
+              className={styles.warningAction}
+              disabled={disableControls || isManualRefreshing}
+              onClick={() => onReauth(file, identity.primary)}
+            />
+          )}
         </div>
       )}
 
