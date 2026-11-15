@@ -16,6 +16,7 @@ import {
   type CodexCreditOverageRowProps,
 } from '@/features/quota/providers/codex/CodexCreditOverageRow';
 import { CodexQuotaBody } from '@/features/quota/providers/codex/CodexQuotaBody';
+import { SnapshotBody } from '@/features/quota/providers/SnapshotBody';
 import {
   CodexCreditOverageError,
   describeCodexCreditOverageError,
@@ -98,6 +99,27 @@ describe('CodexQuotaBody host slot', () => {
 
     expect(plan).toBeGreaterThanOrEqual(0);
     expect(slot).toBeGreaterThan(plan);
+    expect(markup.indexOf('5-hour limit')).toBeGreaterThan(slot);
+  });
+});
+
+describe('SnapshotBody host slots', () => {
+  test('keeps planItems and afterPlan for a windows-only snapshot', () => {
+    const snapshot = { ...codexSnapshot(), extras: null };
+    const markup = renderToStaticMarkup(
+      createElement(SnapshotBody, {
+        snapshot,
+        classes,
+        nowMs: CODEX_NOW,
+        planItems: createElement('span', { id: 'chip' }),
+        afterPlan: createElement('div', { id: 'slot' }),
+      })
+    );
+    const chip = markup.indexOf('id="chip"');
+    const slot = markup.indexOf('id="slot"');
+
+    expect(chip).toBeGreaterThanOrEqual(0);
+    expect(slot).toBeGreaterThan(chip);
     expect(markup.indexOf('5-hour limit')).toBeGreaterThan(slot);
   });
 });

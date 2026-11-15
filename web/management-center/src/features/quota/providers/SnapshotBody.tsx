@@ -9,9 +9,9 @@ export interface SnapshotBodyHostProps {
   snapshot: QuotaSnapshot;
   classes: QuotaClassMap;
   nowMs: number;
-  /** Host-owned chips for the plan row; only bodies with a plan row render them. */
+  /** Host-owned chips for the plan row, rendered for every snapshot of a known provider. */
   planItems?: ReactNode;
-  /** Host-owned content after the plan row; only bodies with a plan row render it. */
+  /** Host-owned content after the plan row, rendered for every snapshot of a known provider. */
   afterPlan?: ReactNode;
 }
 
@@ -43,12 +43,16 @@ export function SnapshotBody({
     );
   } else if (snapshot.provider) {
     body = (
-      <WindowList
-        provider={snapshot.provider}
-        snapshot={snapshot}
-        windows={snapshot.windows}
-        nowMs={nowMs}
-      />
+      <>
+        {planItems && <div className={classes.codexPlan}>{planItems}</div>}
+        {afterPlan}
+        <WindowList
+          provider={snapshot.provider}
+          snapshot={snapshot}
+          windows={snapshot.windows}
+          nowMs={nowMs}
+        />
+      </>
     );
   }
   return (
