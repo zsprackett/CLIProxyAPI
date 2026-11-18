@@ -56,6 +56,14 @@ type ExecutionSessionSharer interface {
 	SharesExecutionSessionsWith(other ProviderExecutor) bool
 }
 
+// ExecutorUnwrapper exposes the underlying executor for wrappers so reuse and
+// session-lifecycle decisions can consult the service-owned executor even when
+// a wrapper hides its concrete type. Wrappers should return their immediate
+// inner executor; the manager follows the chain.
+type ExecutorUnwrapper interface {
+	Unwrap() ProviderExecutor
+}
+
 // AuthExecutionSessionCloser allows executors to release execution sessions
 // associated with a removed credential without tearing down other credentials' sessions.
 type AuthExecutionSessionCloser interface {
@@ -120,6 +128,13 @@ type PluginScheduler interface {
 // that opt into receiving candidates across all priority tiers.
 type PluginSchedulerAcrossPriorities interface {
 	SchedulerWantsAcrossPriorities() bool
+}
+
+// PluginSchedulerContinuity is an optional interface implemented by schedulers
+// that evaluate bounded pre-admission and pre-output-429 continuity for Codex requests.
+type PluginSchedulerContinuity interface {
+	HasSchedulerContinuity() bool
+	EvaluateSchedulerContinuity(context.Context, pluginapi.SchedulerContinuityRequest) (pluginapi.SchedulerContinuityResponse, bool, error)
 }
 
 type pluginSchedulerState interface {
@@ -188,15 +203,16 @@ type Manager struct {
 	// afterFunc schedules the trailing observation save; tests replace it.
 	afterFunc func(time.Duration, func())
 	// quotaPoll is the poll bookkeeping shared by the background loop and PollQuotaNow.
-	quotaPoll        quotaPollState
-	executors        map[string]ProviderExecutor
-	selector         Selector
-	hook             Hook
-	resultPolicy     atomic.Pointer[resultPolicyHolder]
-	mu               sync.RWMutex
-	selectorMu       sync.Mutex
-	configCooldownMu sync.Mutex
-	syncSchedulerMu  sync.Mutex
+	quotaPoll         quotaPollState
+	executors         map[string]ProviderExecutor
+	executorRevisions map[string]uint64
+	selector          Selector
+	hook              Hook
+	resultPolicy      atomic.Pointer[resultPolicyHolder]
+	mu                sync.RWMutex
+	selectorMu        sync.Mutex
+	configCooldownMu  sync.Mutex
+	syncSchedulerMu   sync.Mutex
 	// executionSeq stamps upstream dispatches with a monotonic sequence used
 	// to reject cooldown clears from executions dispatched before the cooldown.
 	executionSeq       atomic.Uint64
@@ -208,6 +224,8 @@ type Manager struct {
 	scheduler          *authScheduler
 	// pluginScheduler runs outside m.mu before falling back to native selection.
 	pluginScheduler PluginScheduler
+	// continuityClock overrides time.Now and timer waiting in unit tests.
+	continuityClock continuityClock
 	// homeRuntimeAuths retains legacy session auth lookups for non-execution callers.
 	homeRuntimeAuths map[string]map[string]*Auth
 	// homeRuntimeAuthOwners prevents a stale selection from clearing a replacement auth.
@@ -276,6 +294,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		store:                 store,
 		authLoadGate:          semaphore.NewWeighted(math.MaxInt64),
 		executors:             make(map[string]ProviderExecutor),
+		executorRevisions:     make(map[string]uint64),
 		selector:              selector,
 		hook:                  hook,
 		auths:                 make(map[string]*Auth),
