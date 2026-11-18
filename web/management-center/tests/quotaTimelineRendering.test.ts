@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import '../src/i18n/index';
+import i18n from '../src/i18n/index';
 import { QuotaTimeline } from '../src/features/quota/components/QuotaTimeline';
 import type { QuotaFileEntry } from '../src/features/quota/logic';
 import type { QuotaSnapshot } from '../src/features/quota/snapshot/types';
@@ -182,5 +182,60 @@ describe('QuotaTimeline rendering', () => {
     );
 
     expect(markup).toBe('');
+  });
+});
+
+describe('QuotaTimeline chart note', () => {
+  // The fork draws Claude lanes from quota_snapshot, so the window goes there.
+  const render = (initialMode: 'weekly' | 'session', periodHours: number, resetAtMs: number) => {
+    const snapshot: QuotaSnapshot = {
+      ...weeklyOnlySnapshot,
+      windows: [
+        {
+          ...weeklyOnlySnapshot.windows[0],
+          id: periodHours === 5 ? 'five_hour' : 'seven_day',
+          class: periodHours === 5 ? 'claude:5h' : 'claude:7d',
+          reset_at: new Date(resetAtMs).toISOString(),
+          period_seconds: periodHours * 3600,
+        },
+      ],
+    };
+    return renderToStaticMarkup(
+      createElement(QuotaTimeline, {
+        ...baseProps,
+        entries: [{ ...weeklyOnly[0], file: { ...weeklyOnly[0].file, quota_snapshot: snapshot } }],
+        initialMode,
+        quotaFor: () => undefined,
+      })
+    );
+  };
+
+  test('explains the bars through an InfoTip after the title instead of a legend sentence', async () => {
+    await i18n.changeLanguage('en');
+    const markup = render('weekly', 168, new Date(2026, 7, 1, 12).getTime());
+    const title = i18n.t('quota_management.windows_title');
+    expect(markup).toContain(`>${title}</h2><button type="button" data-info-tip=""`);
+    expect(markup).toContain(`aria-label="${i18n.t('common.more_info_about', { label: title })}"`);
+    // The sentence lives only in the InfoTip's hidden description, not in the legend footer.
+    const note = i18n.t('quota_management.windows_note_weekly');
+    expect(markup).toContain(`hidden="">${note}</span>`);
+    expect(markup.split(note)).toHaveLength(2);
+    const legend = markup.slice(markup.lastIndexOf('<footer'));
+    expect(legend).toContain(i18n.t('quota_management.windows_legend_current'));
+    expect(legend).not.toContain(note);
+  });
+
+  test('follows the mode, and has nothing to explain when no lane is drawn', async () => {
+    await i18n.changeLanguage('en');
+    const session = render('session', 5, baseProps.now + 2 * 60 * 60 * 1000);
+    expect(session).toContain(
+      `hidden="">${i18n.t('quota_management.windows_note_session')}</span>`
+    );
+    expect(session).not.toContain(i18n.t('quota_management.windows_note_weekly'));
+
+    // Weekly-only data in 5-hour mode: the empty state shows, so no chart note either.
+    const empty = render('session', 168, new Date(2026, 7, 1, 12).getTime());
+    expect(empty).toContain(i18n.t('quota_management.windows_empty_session'));
+    expect(empty).not.toContain('data-info-tip');
   });
 });
