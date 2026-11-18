@@ -30,10 +30,6 @@ var requestFaultCodes = map[string]struct{}{
 	"unsupported_value":              {},
 	"invalid_request_error":          {},
 	"previous_response_not_found":    {},
-	// Anthropic: server-side thread state for previous_message_id is missing on
-	// this account. Another credential cannot have it either; the client recovers
-	// by replaying the conversation as a new thread.
-	"thread_not_found": {},
 }
 
 var requestFaultTypes = map[string]struct{}{
@@ -545,7 +541,7 @@ func hasAuthenticationErrorBody(err error) bool {
 
 func hasRequestFaultBody(err error) bool {
 	return forEachErrorJSONBody(err, func(body string) bool {
-		for _, path := range []string{"error.code", "code", "response.error.code", "body.error.code", "error.details.error_code"} {
+		for _, path := range []string{"error.code", "code", "response.error.code", "body.error.code"} {
 			code := strings.ToLower(strings.TrimSpace(ojson.Get(body, path).String()))
 			if _, ok := requestFaultCodes[code]; ok {
 				return true
