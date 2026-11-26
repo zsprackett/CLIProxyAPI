@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/copilot"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
@@ -33,6 +32,8 @@ var pluginHostHasAuthModelProvider = func(host *pluginhost.Host, provider string
 
 type openAICompatibilityRegistrationEntry struct {
 	providerKey string
+	compatName  string
+	baseURL     string
 	models      []*ModelInfo
 }
 
@@ -66,6 +67,8 @@ func newOpenAICompatibilityRegistrationCacheForConfig(cfg *config.Config) *openA
 		}
 		entry := &openAICompatibilityRegistrationEntry{
 			providerKey: util.OpenAICompatibleProviderKey(providerName),
+			compatName:  compatName,
+			baseURL:     strings.TrimSpace(compat.BaseURL),
 			models:      buildOpenAICompatibilityConfigModels(compat),
 		}
 		cache.byIndex[i] = entry
@@ -85,12 +88,21 @@ func (c *openAICompatibilityRegistrationCache) lookup(auth *coreauth.Auth, compa
 	}
 	if auth != nil && auth.AuthSourceKind() == coreauth.AuthSourceConfig && auth.Attributes != nil {
 		if index, errIndex := strconv.Atoi(strings.TrimSpace(auth.Attributes[coreauth.AttributeConfigIndex])); errIndex == nil {
-			entry, ok := c.byIndex[index]
-			return entry, ok
+			if entry, ok := c.byIndex[index]; ok && openAICompatMatchesAuth(entry.compatName, entry.baseURL, compatName, auth) {
+				return entry, true
+			}
 		}
 	}
 	entry, ok := c.byName[strings.ToLower(strings.TrimSpace(compatName))]
-	return entry, ok
+	if !ok || entry == nil {
+		return nil, false
+	}
+	if auth != nil && auth.Attributes != nil {
+		if attrBase := strings.TrimSpace(auth.Attributes["base_url"]); attrBase != "" && !configBaseURLsEqual(entry.baseURL, attrBase) {
+			return nil, false
+		}
+	}
+	return entry, true
 }
 
 func (s *Service) hasNativeOpenAICompatExecutorConfig(a *coreauth.Auth, providerKey string, cfg *config.Config) bool {
@@ -746,7 +758,7 @@ func (s *Service) tryRegisterPluginModelsForAuthWithConfigFenced(ctx context.Con
 		return true, true
 	}
 	models := result.Models
-	if _, _, compat := openAICompatInfoFromAuth(activeAuth); providerKey == copilot.Provider && !compat {
+	if _, _, compat := openAICompatInfoFromAuth(activeAuth); providerKey == "copilot" && !compat {
 		models = s.copilotPublicPluginModels(activeAuth, models)
 	}
 	models = applyExcludedModels(models, activeExcluded)
