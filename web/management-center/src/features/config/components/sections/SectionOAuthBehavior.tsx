@@ -2,6 +2,8 @@ import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Collapsible } from '@/components/ui/Collapsible';
 import type { ConfigSectionProps } from '../../types';
+import { OAuthErrorRulesEditor } from '../blocks/OAuthErrorRulesEditor';
+import { invalidOAuthRule } from '../../visualOAuthErrorRules';
 import { CodexLiveICEServersEditor } from '../blocks/CodexLiveICEServersEditor';
 import { getValidationMessage } from '../blocks/shared';
 import {
@@ -21,6 +23,7 @@ export function SectionOAuthBehavior({
   onChange,
 }: ConfigSectionProps) {
   const { t } = useTranslation();
+  const invalidRule = validationErrors?.oauthErrorRules && invalidOAuthRule(values.oauthErrorRules);
   const scopeId = useId();
   return (
     // 作用域说明（不影响 API Key 凭据）管着下面每一项，却挂不进 <summary>（不嵌可交互元素）：
@@ -31,6 +34,28 @@ export function SectionOAuthBehavior({
     >
       <FieldStack>
         <FieldHint id={scopeId}>{t('config_management.visual.additions.oauthHint')}</FieldHint>
+
+        <SettingList>
+          <BlockSetting
+            fieldId="oauthErrorRules"
+            label={t('config_management.visual.additions.oauthErrorRules.label')}
+            description={t('config_management.visual.additions.oauthErrorRules.hint')}
+            error={
+              invalidRule
+                ? t('config_management.visual.validation.invalid_oauth_error_rules', {
+                    channel: invalidRule.channel,
+                    number: invalidRule.ruleNumber,
+                  })
+                : undefined
+            }
+          >
+            <OAuthErrorRulesEditor
+              value={values.oauthErrorRules}
+              disabled={disabled}
+              onChange={(oauthErrorRules) => onChange({ oauthErrorRules })}
+            />
+          </BlockSetting>
+        </SettingList>
 
         <SettingList title={t('config_management.visual.additions.claudeTitle')}>
           <ToggleSetting

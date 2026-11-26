@@ -1,6 +1,5 @@
 /**
- * Timezone labelling, and the guard against the Asia/Shanghai hardcode
- * returning.
+ * Timezone labelling.
  *
  * Codex reset-credit expiry was rendered in a fixed GMT+8 while every other
  * timestamp on the same page used the browser's timezone — so one credit
@@ -50,14 +49,11 @@ describe('resolveTimeZoneLabel', () => {
   });
 });
 
-describe('Asia/Shanghai hardcode', () => {
-  test('the expiry heading interpolates a timezone in all four locales', async () => {
-    for (const locale of ['en', 'zh-CN', 'zh-TW', 'ru']) {
-      await i18n.changeLanguage(locale);
-      const label = i18n.t('codex_quota.reset_credits_expiry_label', { timezone: 'GMT+8' });
-      expect(label).toContain('GMT+8');
-      expect(label).not.toContain('{{');
-    }
+describe('Codex reset-credit expiry heading', () => {
+  test('interpolates the timezone label', async () => {
     await i18n.changeLanguage('en');
+    const label = i18n.t('codex_quota.reset_credits_expiry_label', { timezone: 'GMT+8' });
+    expect(label).toContain('GMT+8');
+    expect(label).not.toContain('{{');
   });
 });

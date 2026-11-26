@@ -191,6 +191,7 @@ export function QuotaPage() {
   const quotaSnapshots = useQuotaStore((state) => state.quotaSnapshots);
   const devinQuota = useQuotaStore((state) => state.devinQuota);
   const kimiQuota = useQuotaStore((state) => state.kimiQuota);
+  const copilotQuota = useQuotaStore((state) => state.copilotQuota);
   const metaQuota = useQuotaStore((state) => state.metaQuota);
   const pluginQuota = useQuotaStore((state) => state.pluginQuota);
   const xaiQuota = useQuotaStore((state) => state.xaiQuota);
@@ -203,11 +204,21 @@ export function QuotaPage() {
         codex: quotaPolls,
         devin: devinQuota,
         kimi: kimiQuota,
+        copilot: copilotQuota,
         meta: metaQuota,
         plugin: pluginQuota,
         xai: xaiQuota,
       }) as unknown as Record<QuotaProviderType, Record<string, QuotaCardState>>,
-    [antigravityQuota, quotaPolls, devinQuota, kimiQuota, metaQuota, pluginQuota, xaiQuota]
+    [
+      antigravityQuota,
+      quotaPolls,
+      devinQuota,
+      kimiQuota,
+      copilotQuota,
+      metaQuota,
+      pluginQuota,
+      xaiQuota,
+    ]
   );
 
   const getQuota = useCallback(

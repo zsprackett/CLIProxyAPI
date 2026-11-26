@@ -10,7 +10,7 @@
 import type { ComponentType } from 'react';
 import type { TFunction } from 'i18next';
 import { useQuotaStore } from '@/stores';
-import type { AuthFileItem } from '@/types';
+import type { AntigravityQuotaState, AuthFileItem } from '@/types';
 import type { QuotaSnapshot } from '../snapshot/types';
 import type { QuotaBodyProps } from '../types';
 import type { QuotaProviderType, QuotaStore } from './types';
@@ -18,6 +18,8 @@ import { ANTIGRAVITY_CONFIG } from './antigravity/data';
 import { AntigravityQuotaBody } from './antigravity/AntigravityQuotaBody';
 import { DEVIN_CONFIG } from './devin/data';
 import { DevinQuotaBody } from './devin/DevinQuotaBody';
+import { COPILOT_CONFIG } from './copilot/data';
+import { CopilotQuotaBody } from './copilot/CopilotQuotaBody';
 import { META_CONFIG } from './meta/data';
 import { MetaQuotaBody } from './meta/MetaQuotaBody';
 import { KIMI_CONFIG } from './kimi/data';
@@ -35,6 +37,7 @@ export interface QuotaCardState {
   errorStatus?: number;
   /** When a success state was fetched, so `newerQuotaReading` can compare it with the snapshot. */
   fetchedAtMs?: number;
+  validation?: AntigravityQuotaState['validation'];
 }
 
 export interface QuotaAdapter {
@@ -51,7 +54,7 @@ export interface QuotaAdapter {
   storeSetter: keyof QuotaStore;
   buildLoadingState: () => QuotaCardState;
   buildSuccessState: (data: unknown) => QuotaCardState;
-  buildErrorState: (message: string, status?: number) => QuotaCardState;
+  buildErrorState: (message: string, status?: number, cause?: unknown) => QuotaCardState;
   /** Absent for snapshot providers, whose data is the credential's snapshot. */
   Body?: ComponentType<QuotaBodyProps<QuotaCardState>>;
 }
@@ -71,6 +74,7 @@ export const QUOTA_ADAPTERS: Record<QuotaProviderType, QuotaAdapter> = {
   codex: CODEX_CONFIG as unknown as QuotaAdapter,
   devin: withFetchedAt({ ...DEVIN_CONFIG, Body: DevinQuotaBody } as unknown as QuotaAdapter),
   kimi: withFetchedAt({ ...KIMI_CONFIG, Body: KimiQuotaBody } as unknown as QuotaAdapter),
+  copilot: withFetchedAt({ ...COPILOT_CONFIG, Body: CopilotQuotaBody } as unknown as QuotaAdapter),
   meta: withFetchedAt({ ...META_CONFIG, Body: MetaQuotaBody } as unknown as QuotaAdapter),
   plugin: withFetchedAt({ ...PLUGIN_CONFIG, Body: PluginQuotaBody } as unknown as QuotaAdapter),
   xai: withFetchedAt({ ...XAI_CONFIG, Body: XaiQuotaBody } as unknown as QuotaAdapter),

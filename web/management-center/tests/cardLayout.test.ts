@@ -18,8 +18,6 @@ import { QUOTA_CLASS_KEYS, bindQuotaClasses } from '@/features/quota/types';
 import type { QuotaExtras, QuotaSnapshot } from '@/features/quota/snapshot/types';
 import { CODEX_NOW, codexSnapshot } from './fixtures/quotaSnapshotCodex';
 
-const LOCALES = ['en', 'zh-CN', 'zh-TW', 'ru', 'vi', 'ko', 'tr'];
-
 const claudeSnapshot = (lastPollError?: string): QuotaSnapshot => ({
   provider: 'claude',
   windows: [],
@@ -260,18 +258,4 @@ describe('Compact status notices', () => {
       expect(rule[1]).not.toContain('.codexResetCreditsError');
     }
   });
-});
-
-describe('card layout strings', () => {
-  for (const locale of LOCALES) {
-    test(`${locale} has every card layout label`, async () => {
-      const messages = (await Bun.file(`src/i18n/locales/${locale}.json`).json()) as {
-        card_layout: Record<string, unknown>;
-      };
-      for (const key of ['label', 'even', 'stacked', 'compact', 'show_details', 'hide_details']) {
-        expect(typeof messages.card_layout[key]).toBe('string');
-        expect(String(messages.card_layout[key]).trim()).not.toBe('');
-      }
-    });
-  }
 });

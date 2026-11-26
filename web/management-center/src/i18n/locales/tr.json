@@ -130,7 +130,7 @@
     "auth_files": "Kimlik Dosyaları ve Kimlik Bilgileri",
     "oauth": "OAuth Yetkilendirmesi",
     "routing": "Öncelik katmanları ve yük devretme",
-    "quota_management": "API Anahtarları ve Sınırlar",
+    "quota_management": "OAuth Kimlik Bilgisi Kotaları",
     "plugins": "Kurulum, güncelleme ve yapılandırma",
     "logs": "İstek İzleme",
     "config_management": "Ağ Geçidi Yapılandırması",
@@ -291,7 +291,7 @@
     "manual_refresh_requested": "“{{name}}” için Kimlik Bilgisi Yenilemesi İstendi",
     "manual_refresh_failed": "“{{name}}” için Kimlik Bilgisi Yenilemesi İstenemedi: {{message}}",
     "delete_button": "Sil",
-    "delete_confirm": "Dosyayı Silmek İstediğinden Emin Misin",
+    "delete_confirm": "\"{{name}}\" Silinsin mi? Bu İşlem Geri Alınamaz.",
     "delete_all_confirm": "Tüm Kimlik Dosyalarını Silmek İstediğinden Emin Misin? Bu İşlem Geri Alınamaz!",
     "delete_filtered_confirm": "Tüm {{type}} Kimlik Dosyalarını Silmek İstediğinden Emin Misin? Bu İşlem Geri Alınamaz!",
     "delete_problem_button": "Sorunlu Dosyaları Sil",
@@ -343,6 +343,7 @@
     "filter_aistudio": "AIStudio",
     "filter_claude": "Claude",
     "filter_codex": "Codex",
+    "filter_copilot": "GitHub Copilot",
     "filter_meta": "Muse (Meta)",
     "filter_devin": "Devin",
     "filter_antigravity": "Antigravity",
@@ -447,10 +448,11 @@
     "plan_ultra_lite": "Ultra Lite"
   },
   "antigravity_quota": {
+    "verify_account": "Devam etmek için hesabınızı doğrulayın.",
     "title": "Antigravity Kotası",
     "empty_title": "Antigravity Kimlik Dosyası Yok",
     "empty_desc": "Kalan Kotayı Görmek için Bir Antigravity Kimlik Bilgisi Yükle.",
-    "idle": "Kotayı Yenilemek için Buraya Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Kota Yükleniyor...",
     "load_failed": "Kota Yüklenemedi: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -478,7 +480,7 @@
   "plugin_quota": {
     "empty_title": "Eklenti Kimlik Dosyası Yok",
     "empty_desc": "Kalan Kotayı Görmek için Bir Eklenti Hesabı Bağla.",
-    "idle": "Kotayı Yenilemek için Buraya Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Kota Yükleniyor...",
     "load_failed": "Kota Yüklenemedi: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -492,7 +494,7 @@
     "title": "Claude Kotası",
     "empty_title": "Claude OAuth Dosyası Yok",
     "empty_desc": "Kotayı Görmek için Claude OAuth ile Giriş Yap.",
-    "idle": "Kotayı Yenilemek için Buraya Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Kota Yükleniyor...",
     "load_failed": "Kota Yüklenemedi: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -532,7 +534,7 @@
     "title": "Codex Kotası",
     "empty_title": "Codex Kimlik Dosyası Yok",
     "empty_desc": "Kotayı Görmek için Bir Codex Kimlik Bilgisi Yükle.",
-    "idle": "Kotayı Yenilemek için Buraya Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Kota Yükleniyor...",
     "load_failed": "Kota Yüklenemedi: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -622,16 +624,27 @@
     "stale_request": "Bağlantı veya Kimlik Bilgisi Değişti. Lütfen Yeniden Dene.",
     "empty_data": "Devin Kullanılabilir Kota Verisi Döndürmedi.",
     "loading": "Devin Kotası Sorgulanıyor…",
-    "idle": "Devin Kotasını Sormak için Tıkla",
+    "idle": "Kotayı Sorgula",
     "load_failed": "Kota Sorgulanamadı: {{message}}",
     "empty_title": "Devin Kimlik Bilgisi Yok",
     "empty_desc": "Kotayı Sormak için Bir Devin Kimlik Dosyası Yükle veya Arka Uç CLI ile Giriş Yap."
+  },
+  "copilot_quota": {
+    "title": "GitHub Copilot Kotası",
+    "empty_title": "GitHub Copilot Kimlik Bilgisi Yok",
+    "empty_desc": "Kotayı Sormak için GitHub Copilot OAuth ile Giriş Yap veya Bir GitHub Copilot Kimlik Dosyası Yükle.",
+    "idle": "Kotayı Sorgula",
+    "loading": "GitHub Copilot Kotası Sorgulanıyor…",
+    "load_failed": "Kota Sorgulanamadı: {{message}}",
+    "remaining": "%{{percent}} Kaldı",
+    "premium": "Aylık kota",
+    "unavailable": "Kota alınamadı. Copilot kimlik bilgilerini kontrol edip tekrar deneyin."
   },
   "meta_quota": {
     "title": "Muse (Meta) Kotası",
     "empty_title": "Muse Kimlik Bilgisi Yok",
     "empty_desc": "Kotayı Sormak için Muse OAuth ile Giriş Yap veya Bir Meta Kimlik Dosyası Yükle.",
-    "idle": "Muse Kotasını Sormak için Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Muse Kotası Sorgulanıyor…",
     "load_failed": "Kota Sorgulanamadı: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -661,7 +674,7 @@
     "empty_desc": "Kalan Kotayı Görmek için Bir Kimi Kimlik Bilgisi Yükle.",
     "domain_unavailable": "Kimi Kimlik Bilgisinin Etki Alanı Okunamadı. İndirilebilir ve Geçerli Bir Kimlik Doğrulama Dosyası Gerekir.",
     "stale_request": "Bağlantı veya Kimlik Bilgisi Değişti. Lütfen Yeniden Dene.",
-    "idle": "Kotayı Yenilemek için Buraya Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Kota Yükleniyor...",
     "load_failed": "Kota Yüklenemedi: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -678,7 +691,7 @@
     "title": "Grok Kotası",
     "empty_title": "xAI/Grok Kimlik Dosyası Yok",
     "empty_desc": "Grok Kotasını Görmek için xAI OAuth ile Giriş Yap.",
-    "idle": "Kotayı Yenilemek için Buraya Tıkla",
+    "idle": "Kotayı Sorgula",
     "loading": "Kota Yükleniyor...",
     "load_failed": "Kota Yüklenemedi: {{message}}",
     "missing_auth_index": "Kimlik Dosyasında auth_index Eksik",
@@ -892,6 +905,15 @@
     "antigravity_oauth_status_error": "Kimlik Doğrulama Başarısız:",
     "antigravity_oauth_start_error": "Antigravity OAuth Başlatılamadı:",
     "antigravity_oauth_polling_error": "Kimlik Doğrulama Durumu Kontrol Edilemedi:",
+    "copilot_oauth_title": "GitHub Copilot OAuth",
+    "copilot_oauth_button": "GitHub Copilot ile Giriş Yap",
+    "copilot_open_link": "Bağlantıyı Aç",
+    "copilot_copy_link": "Bağlantıyı Kopyala",
+    "copilot_oauth_status_waiting": "Kimlik Doğrulama Bekleniyor...",
+    "copilot_oauth_status_success": "Kimlik Doğrulama Başarılı!",
+    "copilot_oauth_status_error": "Kimlik Doğrulama Başarısız:",
+    "copilot_oauth_start_error": "GitHub Copilot OAuth Başlatılamadı:",
+    "copilot_oauth_polling_error": "Kimlik Doğrulama Durumu Kontrol Edilemedi:",
     "meta_oauth_title": "Muse (Meta) OAuth",
     "meta_oauth_button": "Muse ile Giriş Yap",
     "meta_open_link": "Bağlantıyı Aç",
@@ -1137,6 +1159,8 @@
     "visual_mode_save_blocked": "YAML Sözdizimi Düzeltilene Kadar Görsel Moddan Kaydedilemez",
     "source_changes_before_visual": "Görsel Moda Geçmeden Önce Kaydedilmemiş Kaynak Düzenlemelerini Kaydet veya At.",
     "precise_save_incomplete": "Kesin Kayıt Bitmedi. Bazı Değişiklikler Uygulanmış Olabilir. Taslağın Korundu. Kalan Sunucu Farklarını Görmek için Yeniden Kaydet.",
+    "unsafe_yaml_structure": "Görsel düzenleyici, diğer YAML ayarlarını etkilemeden {{path}} alanını değiştiremiyor. Taslağınız korundu. Bu değişikliği kaynak düzenleyicide yapın.",
+    "sensitive_word_comments": "{{path}} görsel modda kaydedilirse YAML yorumları silinir. Taslağınız korundu. Yorumları kaybetmeden gözden geçirip kaydetmek için kaynak düzenleyicisine geçin.",
     "concurrent_list_conflict": "Taslak Tabanından Sonra Sunucu Listesi {{path}} Değişti. Bu Değişikliklerin Üzerine Yazmamak için Kayıt Engellendi. Taslağın Korundu. Düzenlemelerini Not Et, Sonra Yapılandırmayı Yeniden Yükle ve Uzlaştır.",
     "precise_save_recovery_required": "Kayıt Sonucu Geri Okunamadı. Düzenleme Duraklatıldı. Taslak Tabanını Kurtarmak için Yeniden Kaydet veya Yapılandırmayı Yeniden Yükle.",
     "visual_mode_latest_yaml_invalid": "En Son Sunucu Yapılandırması Geçersiz YAML İçeriyor. Görsel Değişiklikleri Kaydetmeden Önce Kaynak Modda İncele: {{message}}",
@@ -1153,6 +1177,10 @@
     },
     "visual": {
       "serverExtras": {
+        "serverId": {
+          "label": "Dağıtım kimliği",
+          "hint": "Bu dağıtımın sabit UUID değeri. Boş kaydedilirse yeni bir kimlik oluşturulur."
+        },
         "trustedProxies": {
           "label": "Güvenilen Proxy'ler",
           "hint": "IP Adresleri veya CIDR Değerleri. Boş, İletilen Üst Bilgilere Güvenilmediği Anlamına Gelir. Tüm Adres Aralıklarına Güvenmek İstemci IP Sahteciliği Riski Doğurur. Arka Uç Yeniden Başlatması Gerekir."
@@ -1192,6 +1220,11 @@
         "discoveryHint": "Çoklu Yayını Destekleyen Fiziksel Arayüzler ve Geri Döngü Olmayan Bir Dinleyici Gerekir. Docker Genellikle Host Ağı İster. Erişilebilirlik Garanti Değildir."
       },
       "additions": {
+        "oauthErrorRules": {
+          "label": "OAuth istek hata kuralları",
+          "hint": "Her OAuth kanalı için üst sunucu hatalarını sırayla eşleştirerek başka kimlik bilgilerine geçişi ve beklemeyi yönetin.",
+          "channel": "OAuth kanalı (eklenti kanalı da girilebilir)"
+        },
         "oauthTitle": "OAuth Sağlayıcı Davranışı",
         "oauthHint": "Bu Sağlayıcı Ayarları Yalnızca OAuth/Dosya Destekli Kimlik Bilgilerine Uygulanır. API Anahtarı Kimlik Bilgilerine Değil.",
         "claudeTitle": "Claude",
@@ -1275,7 +1308,7 @@
         },
         "antigravityConnectionPoolMaxIdleConnsPerHost": {
           "label": "Ana Makine Başına En Fazla Boşta Bağlantı",
-          "hint": "Kimlik Bilgisi Başına Her Yukarı Akış Ana Makinesi için Tutulan En Fazla Boşta Bağlantı. Varsayılan: 2. Üst Sınır 100. Sıfır, Go Varsayılanı 2 Değerini Kullanır. Negatif Değer Kısa Ömürlü Bağlantılara Geçirir."
+          "hint": "Kimlik bilgisi başına her üst sunucu için en fazla boşta bağlantı sayısı. Boş bırakılırsa varsayılan 2 kullanılır. Üst sınır 100’dür. Sıfır veya negatif değer kısa süreli bağlantı kullanır."
         },
         "xaiInjectXSearch": {
           "label": "x_search Ekle",
@@ -1553,6 +1586,8 @@
         "boolean_false": "false"
       },
       "validation": {
+        "invalid_server_id": "Tire içeren ve sıfır olmayan bir UUID girin.",
+        "invalid_oauth_error_rules": "“{{channel}}” kanalındaki {{number}} numaralı kuralın durum kodunu, eşleşmelerini ve eylemini kontrol edin.",
         "invalid_trusted_proxies": "Her Güvenilen Proxy Geçerli Bir IP Adresi veya CIDR Olmalıdır.",
         "invalid_discovery_service_type": "_name._tcp Kullan: Ad 1–15 Harf, Rakam veya Tire Olmalı. Başta veya Sonda Tire Olmamalı.",
         "validation_blocked": "Kaydetmeden Önce Doğrulama Hatalarını Düzelt",
@@ -1619,13 +1654,14 @@
     "hide_details": "Ayrıntıları Gizle"
   },
   "quota_management": {
+    "open_verification_link": "Doğrulama bağlantısını aç",
     "search_label": "Hesap Ara",
     "search_placeholder": "Dosya Adına veya E-postaya Göre Ara",
     "search_empty_title": "Eşleşen Hesap Yok",
     "search_empty_desc": "Başka Bir Dosya Adı veya E-posta Dene ya da Aramayı Temizle.",
     "search_clear": "Aramayı Temizle",
     "title": "Kota Yönetimi",
-    "refresh_all_credentials": "Tüm Kimlik Bilgilerini Yenile",
+    "refresh_all_credentials": "Tüm Kotaları Yenile",
     "sort_label": "Sırala",
     "sort_default": "Varsayılan",
     "sort_soonest": "En Yakın Toparlanma",
@@ -1665,7 +1701,7 @@
     "meta_loaded": "{{count}} Yüklendi",
     "meta_attention": "{{count}} İlgi Gerekiyor",
     "empty_title": "Kota Yeteneği Olan Kimlik Bilgisi Yok",
-    "empty_desc": "Kotasını Burada İzlemek için Bir Antigravity, Claude, Codex, xAI veya Kimi Kimlik Bilgisi Bağla.",
+    "empty_desc": "Kotasını Görmek için Kota Sorgulamayı Destekleyen Bir OAuth Kimlik Bilgisi Ekle.",
     "windows_title": "Kota Pencereleri",
     "windows_span_weekly": "İki Hafta",
     "windows_span_session": "Üç Gün",
@@ -2094,8 +2130,8 @@
   },
   "language": {
     "switch": "Dil",
-    "chinese": "中文",
-    "chinese_tw": "Geleneksel Çince (Tayvan)",
+    "chinese": "简体中文",
+    "chinese_tw": "繁體中文（台灣）",
     "english": "English",
     "russian": "Русский",
     "vietnamese": "Tiếng Việt",
@@ -2122,6 +2158,43 @@
     "version": "Yönetim Arayüzü Sürümü"
   },
   "providersPage": {
+    "connections": {
+      "edit": "Bağlantıyı düzenle",
+      "create": "Bağlantı ekle",
+      "search": "Bağlantı, anahtar, URL veya ön ek ara…",
+      "keyCount_one": "{{count}} anahtar",
+      "keyCount_other": "{{count}} anahtar",
+      "keysActive_one": "{{active}}/{{count}} anahtar etkin",
+      "keysActive_other": "{{active}}/{{count}} anahtar etkin",
+      "disableKeys": "“{{name}}” içindeki tüm anahtarları devre dışı bırak",
+      "enableKeys": "“{{name}}” içindeki tüm anahtarları etkinleştir"
+    },
+    "nativeGroup": {
+      "defaults": "Bağlantı varsayılanları",
+      "description": "Anahtarlar kendi ayarlarını belirtmedikçe bu değerleri devralır. Temel URL tüm anahtarlar için geçerlidir.",
+      "name": "Bağlantı adı",
+      "headersJson": "İstek başlıkları (JSON nesnesi)",
+      "excluded": "Hariç tutulan modeller (her satıra bir model)",
+      "pool": "Bağlantı havuzu",
+      "configurePool": "Bağlantı havuzunu yapılandır",
+      "poolHint": "Havuz eklemek varsayılan olarak bağlantıları yeniden kullanmayı etkinleştirir. Her anahtarın bağlantıları ayrıdır. Zaman aşımı veya sınır sıfır ya da negatifse bağlantılar yeniden kullanılmaz.",
+      "poolEnabled": "Bağlantıları yeniden kullan",
+      "poolAuto": "Varsayılan (etkin)",
+      "poolTimeout": "Boşta kalan bağlantı zaman aşımı",
+      "poolLimit": "Sunucu başına en fazla boşta kalan bağlantı",
+      "invalidLimit": "En fazla boşta kalan bağlantı sayısı güvenli bir tam sayı olmalıdır.",
+      "modelNameRequired": "Her model için sağlayıcıdaki model adını girin.",
+      "disabled": "Bu anahtar grubunu devre dışı bırak"
+    },
+    "groupActions": {
+      "search": "Bağlantı, anahtar, URL veya önek ara…",
+      "create": "Bağlantı oluştur",
+      "edit": "Bağlantıyı düzenle",
+      "delete": "Bağlantıyı sil",
+      "append": "Anahtar ekle",
+      "confirm": "“{{name}}” bağlantısı ve tüm anahtarları ({{count}}) silinsin mi?",
+      "settings": "Bağlantı ayarları"
+    },
     "behavior": {
       "title": "Sağlayıcıya Özel Davranış",
       "alphaSearch": "Alpha Search Etkinleştir",
@@ -2162,6 +2235,24 @@
       "removeModel": "Modeli Kaldır",
       "modelName": "Model Adı",
       "modelAlias": "Takma Ad (İsteğe Bağlı)"
+    },
+    "nativeKey": {
+      "routing": "Protokol ayarları",
+      "nativeToolSearch": "Anthropic yerel araç araması için özel uç noktaya güven",
+      "interactions": "Vertex Interactions API kullan",
+      "openapi": "Vertex OpenAPI uç noktasını kullan",
+      "location": "OpenAPI bölgesi",
+      "pool": "Bağlantı havuzu",
+      "poolHint": "Özel ayarlar, burada veya grupta devre dışı bırakılmadıkça havuzu etkinleştirir. Boş alanlar üst ayarları kullanır. Sıfır veya negatif zaman aşımı ya da sınır yeniden kullanımı kapatır.",
+      "reuse": "Sunucu bağlantılarını yeniden kullan",
+      "timeout": "Boşta kalma süresi (ör. 5m)",
+      "maxIdle": "Sunucu başına en fazla boşta bağlantı",
+      "invalidMaxIdle": "Boşta bağlantı sınırı güvenli bir tam sayı olmalıdır.",
+      "empty": "Boş",
+      "valueSource": "{{field}}: değer kaynağı",
+      "inheritHint": "Devralınan alanlar bağlantı ayarlarını izler. Bu anahtara boş bir değer vermek veya özel bir değer belirlemek için ilgili seçeneği seçin.",
+      "disableKey": "Bu anahtarı devre dışı bırak",
+      "disableShort": "Kapalı"
     },
     "runtimePolicy": {
       "title": "Gelişmiş Çalışma Zamanı İlkesi",
@@ -2223,7 +2314,9 @@
       "save": "Kaydet",
       "create": "Oluştur",
       "enable": "Etkinleştir",
-      "disable": "Devre Dışı Bırak"
+      "disable": "Devre Dışı Bırak",
+      "newFor": "{{provider}} ekle",
+      "addProvider": "Sağlayıcı ekle"
     },
     "categories": {
       "title": "Sağlayıcılar",
@@ -2246,12 +2339,6 @@
       "kimi": "Kimi"
     },
     "table": {
-      "key": "Anahtar",
-      "baseUrl": "Temel URL",
-      "prefix": "Önek",
-      "models": "Modeller/Üst Bilgiler",
-      "status": "Durum",
-      "actions": "Eylemler",
       "metrics": {
         "models": "Modeller",
         "keys": "Anahtarlar",
@@ -2260,15 +2347,15 @@
       "websocketsTag": "WebSockets",
       "cloakTag": "Cloak",
       "cliProfileTag": "CLI Profili",
-      "empty": "Henüz Kaynak Yok. Eklemek için \"Yeni\" Seçeneğine Tıkla.",
-      "filterPlaceholder": "Anahtar, URL veya Önek Ara…"
+      "filterPlaceholder": "Anahtar, URL veya Önek Ara…",
+      "emptyBrand": "Henüz {{provider}} yapılandırması yok",
+      "noMatch": "Geçerli filtrelerle eşleşen kaynak yok"
     },
     "sponsor": {
       "protocolSummary": "Anthropic / OpenAI / Gemini / Codex API (Responses)",
       "detailHint": "{{provider}} Protokole Göre Eşleşen API Anahtarı Yapılandırmalarına Yazılır. Bu Görünüm Onları Birlikte Yönetir.",
       "registerLink": "Buradan Kaydol",
       "registerNow": "Hemen Kaydol",
-      "kimiPromo": "Yeni Kullanıcılar İlk Başarılı Yüklemelerinin %10'u Değerinde API Kredisi Alır. Üst Sınır ¥1000. Teklif 30 Eylül'de Biter.",
       "dashboardLink": "Pano",
       "emptyRegisterHint": "Henüz Yapılandırma Yok.",
       "apiKeyHint": "Bu Anahtar Yalnızca Seçilen Grup/Protokol Yapılandırmasına Yazılır.",
@@ -2280,6 +2367,7 @@
       "usageInvalid": "Geçersiz Anahtar",
       "usageEmpty": "Uç Nokta Kullanım Verisi Döndürmedi.",
       "usageApiKeyRequired": "API Anahtarı Gerekli",
+      "ambiguousProtocols": "{{protocols}} için birden fazla grup eşleşiyor. Bu grupları ilgili sağlayıcı düzenleyicisinde düzenleyin.",
       "aggregationConflict": "Bu Gruplanmış Sağlayıcı Birden Fazla Arka Uç Yapılandırması veya OpenAI Anahtarı İçeriyor. Veri Kaybını Önlemek için Kaynak Yapılandırmada Düzenle.",
       "partialMutationWarning": "Bir veya Daha Fazla Protokol Güncellenmiş Olabilecekken İşlem Başarısız Oldu. En Son Yapılandırma Yeniden Yüklendi. Yeniden Denemeden Önce İncele.",
       "groupedKeysTitle": "Gruplanmış Anahtarlar",
@@ -2330,14 +2418,6 @@
         "openai": "OpenAI Uyumlu",
         "gemini": "Gemini",
         "codexResponses": "Codex API (Responses)"
-      },
-      "double11": {
-        "badge": "11.11 · Sınırlı süre",
-        "title": "{{provider}} 11.11 Yükleme Bonusu",
-        "description": "Kampanya süresince {{provider}} hesabınıza yükleme yapın, yükleme tutarının %{{percent}} kadarını ek kredi olarak kazanın.",
-        "bonus": "Yükleme bonusu",
-        "cta": "Hemen katıl",
-        "ctaAria": "Hemen katıl: {{provider}} 11.11 yükleme kampanyası (yeni sekmede açılır)"
       }
     },
     "status": {
@@ -2431,7 +2511,15 @@
         "baseUrlRequired": "Temel URL Zorunlu",
         "weightInteger": "Zamanlama Ağırlığı Tam Sayı Olmalıdır",
         "weightMax": "Zamanlama Ağırlığı {{max}} Değerini Aşamaz"
-      }
+      },
+      "sections": {
+        "connection": "Bağlantı",
+        "connectivity": "Bağlantı testi",
+        "routing": "Yönlendirme",
+        "advanced": "Gelişmiş"
+      },
+      "headerName": "Başlık adı",
+      "headerValue": "Başlık değeri"
     },
     "delete": {
       "title": "Kaynağı Sil",
@@ -2493,10 +2581,25 @@
         "selectAll": "Tümünü Seç",
         "clear": "Temizle",
         "empty": "Henüz Yapılandırılmış Model Yok"
-      }
+      },
+      "clearFilters": "Filtreleri temizle"
     },
     "modelCatalog": {
       "notLoaded": "Yüklenmedi"
+    },
+    "card": {
+      "requests": "İstekler"
+    },
+    "picker": {
+      "featured": "Hızlı bağlantı",
+      "featuredBadge": "Önerilen",
+      "oneKey": "Tek anahtarla {{count}} protokol",
+      "official": "Resmî API’ler",
+      "custom": "Özel",
+      "connect": "Bağla",
+      "connected": "{{count}} bağlı",
+      "onboardingTitle": "İlk yapay zekâ sağlayıcınızı bağlayın",
+      "moreQuickConnect": "Diğer hızlı bağlantı ortakları"
     }
   },
   "claude_reset": {
@@ -2648,7 +2751,7 @@
     "segment_message": "mesaj {{index}}",
     "segment_instructions": "talimatlar",
     "segment_input": "girdi {{index}}",
-    "segment_other": "istem",
+    "segment_unknown": "istem",
     "segment_tools_delta": "araçlar {{from}} → {{to}}",
     "col_last_activity": "Son etkinlik",
     "col_requests": "İstekler",

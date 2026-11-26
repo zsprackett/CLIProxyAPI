@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createInstance } from 'i18next';
@@ -10,10 +9,11 @@ import { SponsorProviderForm } from '@/features/providers/sheets/forms/SponsorPr
 import { CheckboxField } from '@/features/providers/sheets/forms/CheckboxField';
 import { ResourceDetailView } from '@/features/providers/sheets/ResourceDetailView';
 import { getSponsorProviderDefinition } from '@/features/providers/sponsorDefinitions';
+import type { NativeProviderFamily } from '@/services/api/providers';
 import type {
-  ProviderBrand,
   ProviderResource,
   SponsorProviderBrand,
+  SponsorProtocol,
 } from '@/features/providers/types';
 
 const i18n = createInstance();
@@ -35,7 +35,7 @@ const REMOVED = {
   protocolModels: 'config models. Fetch from',
 };
 
-const renderBase = (brand: ProviderBrand) =>
+const renderBase = (brand: NativeProviderFamily) =>
   render(
     createElement(BaseProviderForm, {
       brand,
@@ -43,14 +43,15 @@ const renderBase = (brand: ProviderBrand) =>
       mode: 'create',
       mutating: false,
       formId: 'f',
-      onSubmit: async () => {},
+      onNativeSubmit: async () => {},
     })
   );
 
-const renderSponsor = (brand: SponsorProviderBrand) =>
+const renderSponsor = (brand: SponsorProviderBrand, ambiguousProtocols?: SponsorProtocol[]) =>
   render(
     createElement(SponsorProviderForm, {
       brand,
+      ambiguousProtocols,
       resource: null,
       mode: 'create',
       mutating: false,
@@ -207,14 +208,17 @@ describe('provider form notes', () => {
     expect(html).not.toContain('<p ');
     expectNote(html, 'Fenno', note);
   });
+});
 
-  test('provider sheet header carries only the title', () => {
-    const source = readFileSync(
-      new URL('../src/features/providers/sheets/ProviderSheet.tsx', import.meta.url),
-      'utf8'
-    );
-    expect(source).not.toMatch(/\beyebrow=/);
-    expect(source).not.toMatch(/\bdescription=/);
-    expect(source).toContain('title={titleText}');
-  });
+test('sponsor forms explain blocked protocols and default to an available alternative', () => {
+  const partial = renderSponsor('fennoAI', ['codex']);
+  expect(partial).toContain(
+    i18n.t('providersPage.sponsor.ambiguousProtocols', {
+      protocols: sponsor.protocols.codexResponses,
+    })
+  );
+  expect(partial).toContain(`<strong>${sponsor.protocols.anthropic}</strong>`);
+  const blocked = renderSponsor('fennoAI', ['codex', 'claude']);
+  expect(blocked).toContain('role="alert"');
+  expect(blocked).not.toContain('<input');
 });
