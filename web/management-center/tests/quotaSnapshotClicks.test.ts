@@ -178,7 +178,7 @@ describe('a credential re-added at the same path', () => {
     expect(card).toContain('idleBody');
     expect(card).not.toContain('Max');
     const section = renderAuthFileSection(claudeFile());
-    expect(section).toContain('Click here to refresh quota');
+    expect(section).toContain('Check quota');
     expect(section).not.toContain('Weekly limit');
     expect(section).not.toContain('Max');
   });

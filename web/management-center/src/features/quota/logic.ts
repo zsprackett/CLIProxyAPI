@@ -7,6 +7,7 @@ import type { AuthFileItem } from '@/types';
 import { ANTIGRAVITY_CONFIG } from './providers/antigravity/data';
 import { DEVIN_CONFIG } from './providers/devin/data';
 import { KIMI_CONFIG } from './providers/kimi/data';
+import { COPILOT_CONFIG } from './providers/copilot/data';
 import { META_CONFIG } from './providers/meta/data';
 import { PLUGIN_CONFIG } from './providers/plugin/data';
 import { CLAUDE_CONFIG, CODEX_CONFIG } from './providers/snapshotPoll';
@@ -21,6 +22,7 @@ const QUOTA_FILTER_MAP: Record<QuotaProviderType, (file: AuthFileItem) => boolea
   codex: CODEX_CONFIG.filterFn,
   devin: DEVIN_CONFIG.filterFn,
   kimi: KIMI_CONFIG.filterFn,
+  copilot: COPILOT_CONFIG.filterFn,
   meta: META_CONFIG.filterFn,
   plugin: PLUGIN_CONFIG.filterFn,
   xai: XAI_CONFIG.filterFn,

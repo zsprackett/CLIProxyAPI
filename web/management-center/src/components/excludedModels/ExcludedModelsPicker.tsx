@@ -10,6 +10,8 @@ import {
   matchedModelsByRule,
   normalizeExcludedRules,
   replaceCustomExcludedRules,
+  type RuleEditorDraft,
+  currentRuleEditorDraft,
   splitExcludedRules,
   summarizeExclusion,
   toggleExcludedRule,
@@ -64,6 +66,7 @@ export function ExcludedModelsPicker({
   const panelId = `${baseId}-panel`;
   const listboxId = `${baseId}-listbox`;
   const [open, setOpen] = useState(false);
+  const [ruleDraft, setRuleDraft] = useState<RuleEditorDraft | null>(null);
   const [reservedHit, setReservedHit] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -82,6 +85,9 @@ export function ExcludedModelsPicker({
     [reservedKeys, value]
   );
 
+  const editing = currentRuleEditorDraft(ruleDraft, rules);
+  if (ruleDraft && !editing) setRuleDraft(null);
+
   const candidateIds = useMemo(() => candidates.map((c) => c.id), [candidates]);
   const stats = useMemo(() => summarizeExclusion(rules, candidateIds), [candidateIds, rules]);
   const { exactRules, unknownRules, customRules } = useMemo(
@@ -92,7 +98,9 @@ export function ExcludedModelsPicker({
   const commit = useCallback(
     (next: readonly string[]) => {
       // 出口再滤一次保留规则：纵深防御，规则编辑器里手打的 `*` 到不了调用方。
-      onChange(next.filter((rule) => !reservedKeys.has(rule.trim().toLowerCase())));
+      const published = next.filter((rule) => !reservedKeys.has(rule.trim().toLowerCase()));
+      onChange(published);
+      return published;
     },
     [onChange, reservedKeys]
   );
@@ -127,8 +135,12 @@ export function ExcludedModelsPicker({
     const typedReserved = text
       .split(/\r?\n/)
       .some((line) => reservedKeys.has(line.trim().toLowerCase()));
+    // Merge against the selection before typing, not exact matches from the previous keystroke.
+    const baseRules = editing?.baseRules ?? rules;
+    const baseCandidates = editing?.baseCandidates ?? candidateIds;
+    const published = commit(replaceCustomExcludedRules(baseRules, baseCandidates, text));
+    setRuleDraft({ text, baseRules, baseCandidates, published });
     setReservedHit(typedReserved);
-    commit(replaceCustomExcludedRules(rules, candidateIds, text));
   };
 
   const dismissPanel = useCallback(() => {
@@ -288,7 +300,8 @@ export function ExcludedModelsPicker({
             id={`${baseId}-rules`}
             className="input"
             aria-describedby={`${baseId}-rules-hint`}
-            value={formatExcludedRulesText(customRules)}
+            value={editing?.text ?? formatExcludedRulesText(customRules)}
+            onBlur={() => setRuleDraft(null)}
             placeholder={t('excluded_models.rules_placeholder')}
             rows={3}
             disabled={disabled}

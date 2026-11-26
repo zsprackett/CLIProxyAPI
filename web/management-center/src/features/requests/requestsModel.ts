@@ -216,7 +216,8 @@ export function segmentLabel(cache: CacheDiagnosis): TranslationRef | null {
   }
   const segment = cache.segment;
   if (!segment) return null;
-  const kind = KNOWN_SEGMENTS.has(segment.kind) ? segment.kind : 'other';
+  // Not "other": i18next would read a segment_other key as a plural form of "segment".
+  const kind = KNOWN_SEGMENTS.has(segment.kind) ? segment.kind : 'unknown';
   return { key: `request_log.segment_${kind}`, values: { index: segment.index } };
 }
 

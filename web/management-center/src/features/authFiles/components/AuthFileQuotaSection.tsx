@@ -1,3 +1,4 @@
+import { QuotaErrorMessage } from '@/features/quota/components/QuotaErrorMessage';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,7 +8,7 @@ import {
   useQuotaStore,
 } from '@/stores';
 import type { AuthFileItem } from '@/types';
-import { getStatusFromError, resolveQuotaErrorMessage } from '@/utils/quota';
+import { getStatusFromError } from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { isRuntimeOnlyAuthFile, type QuotaProviderType } from '@/features/authFiles/constants';
 import { Button } from '@/components/ui/Button';
@@ -58,6 +59,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
     }
     if (quotaType === 'devin') return state.devinQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'kimi') return state.kimiQuota[cacheKey] as QuotaCardState | undefined;
+    if (quotaType === 'copilot') return state.copilotQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'meta') return state.metaQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'plugin') return state.pluginQuota[cacheKey] as QuotaCardState | undefined;
     if (quotaType === 'xai') return state.xaiQuota[cacheKey] as QuotaCardState | undefined;
@@ -106,7 +108,7 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
       commitIfQuotaCacheCurrent(cacheGeneration, () => {
         updateQuotaState((prev) => ({
           ...prev,
-          [cacheKey]: adapter.buildErrorState(message, status),
+          [cacheKey]: adapter.buildErrorState(message, status, err),
         }));
         showNotification(
           t('auth_files.quota_refresh_failed', { name: file.name, message }),
@@ -207,11 +209,6 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
         {t('codex_quota.reset_button')}
       </Button>
     ) : undefined;
-  const quotaErrorMessage = resolveQuotaErrorMessage(
-    t,
-    quota?.errorStatus,
-    quota?.error || t('common.unknown_error')
-  );
 
   return (
     <div className={styles.quotaSection}>
@@ -229,11 +226,9 @@ export function AuthFileQuotaSection(props: AuthFileQuotaSectionProps) {
         >
           {t(`${adapter.i18nPrefix}.idle`)}
         </button>
-      ) : quotaStatus === 'error' ? (
+      ) : quotaStatus === 'error' && quota ? (
         <div className={styles.quotaError}>
-          {t(`${adapter.i18nPrefix}.load_failed`, {
-            message: quotaErrorMessage,
-          })}
+          <QuotaErrorMessage quota={quota} i18nPrefix={adapter.i18nPrefix} />
         </div>
       ) : showSnapshot ? null : quota && adapter.Body ? (
         <adapter.Body quota={quota} classes={compactQuotaClasses} />
