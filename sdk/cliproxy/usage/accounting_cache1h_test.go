@@ -1,9 +1,10 @@
 package usage
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/MoeForge/moego/json"
 )
 
 func TestTokenBreakdownWithCacheWrite1hSetsSubset(t *testing.T) {

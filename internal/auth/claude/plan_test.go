@@ -1,11 +1,12 @@
 package claude
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/MoeForge/moego/json"
 )
 
 func TestOAuthProfilePlanType(t *testing.T) {

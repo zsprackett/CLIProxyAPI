@@ -1,11 +1,11 @@
 package helps
 
 import (
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/MoeForge/moego/json"
 	claudeauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/claude"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
