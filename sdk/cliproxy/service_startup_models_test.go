@@ -21,15 +21,57 @@ import (
 // the server listened before those models were registered, so early requests
 // got "unknown provider for model".
 func TestRunServesStoredCredentialModelsFromTheFirstConnection(t *testing.T) {
+	// The prefix keeps this credential's model ids unique in the global registry.
+	body := firstModelsListingWithWatcherHeld(t, map[string]string{
+		"claude-startup@example.com.json": `{"type":"claude","email":"startup@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startuptest"}`,
+	})
+
+	if !strings.Contains(body, `"id":"startuptest/claude-opus-5"`) {
+		t.Fatalf("first /v1/models listing lacks the stored credential's model startuptest/claude-opus-5:\n%s", body)
+	}
+}
+
+func TestRunFirstModelListingHonorsStoredCredentialExcludedModels(t *testing.T) {
+	body := firstModelsListingWithWatcherHeld(t, map[string]string{
+		"claude-excluded@example.com.json": `{"type":"claude","email":"excluded@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startupexcluded","excluded_models":["claude-opus-5"]}`,
+	})
+
+	if !strings.Contains(body, `"id":"startupexcluded/`) {
+		t.Fatalf("first /v1/models listing lacks the stored credential's models:\n%s", body)
+	}
+	if strings.Contains(body, `"id":"startupexcluded/claude-opus-5"`) {
+		t.Fatalf("first /v1/models listing exposes startupexcluded/claude-opus-5, which the credential excludes:\n%s", body)
+	}
+}
+
+func TestRunFirstModelListingHonorsStoredCodexFreePlan(t *testing.T) {
+	body := firstModelsListingWithWatcherHeld(t, map[string]string{
+		"codex-free@example.com.json": `{"type":"codex","email":"free@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startupfree","plan_type":"free"}`,
+	})
+
+	if !strings.Contains(body, `"id":"startupfree/gpt-6-luna"`) {
+		t.Fatalf("first /v1/models listing lacks the Free model startupfree/gpt-6-luna:\n%s", body)
+	}
+	if strings.Contains(body, `"id":"startupfree/gpt-6-astra"`) {
+		t.Fatalf("first /v1/models listing exposes the Pro-only model startupfree/gpt-6-astra for a Free credential:\n%s", body)
+	}
+}
+
+// firstModelsListingWithWatcherHeld starts the service with the given auth
+// files and returns the first /v1/models listing. The watcher factory blocks
+// until that listing is read, so it shows only what the service published
+// before the watcher's first scan.
+func firstModelsListingWithWatcherHeld(t *testing.T, authFiles map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 	authDir := filepath.Join(dir, "auths")
 	if errMkdir := os.MkdirAll(authDir, 0o700); errMkdir != nil {
 		t.Fatal(errMkdir)
 	}
-	// The prefix keeps this credential's model ids unique in the global registry.
-	credential := `{"type":"claude","email":"startup@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startuptest"}`
-	if errWrite := os.WriteFile(filepath.Join(authDir, "claude-startup@example.com.json"), []byte(credential), 0o600); errWrite != nil {
-		t.Fatal(errWrite)
+	for name, content := range authFiles {
+		if errWrite := os.WriteFile(filepath.Join(authDir, name), []byte(content), 0o600); errWrite != nil {
+			t.Fatal(errWrite)
+		}
 	}
 	port := freeStartupTestPort(t)
 	configPath := filepath.Join(dir, "config.yaml")
@@ -52,14 +94,27 @@ oauth:
 	if errLoad != nil {
 		t.Fatalf("load config: %v", errLoad)
 	}
-	service, errBuild := NewBuilder().WithConfig(cfg).WithConfigPath(configPath).Build()
+	releaseWatcher := make(chan struct{})
+	heldWatcherFactory := func(configPath, authDir string, reload func(*config.Config)) (*WatcherWrapper, error) {
+		<-releaseWatcher
+		return defaultWatcherFactory(configPath, authDir, reload)
+	}
+	service, errBuild := NewBuilder().WithConfig(cfg).WithConfigPath(configPath).WithWatcherFactory(heldWatcherFactory).Build()
 	if errBuild != nil {
 		t.Fatalf("build service: %v", errBuild)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- service.Run(ctx) }()
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(releaseWatcher)
+		}
+	}
 	t.Cleanup(func() {
+		release()
 		cancel()
 		select {
 		case <-done:
@@ -69,10 +124,8 @@ oauth:
 	})
 
 	body := firstModelsListing(t, port, done)
-
-	if !strings.Contains(body, `"id":"startuptest/claude-opus-5"`) {
-		t.Fatalf("first /v1/models listing lacks the stored credential's model startuptest/claude-opus-5:\n%s", body)
-	}
+	release()
+	return body
 }
 
 // firstModelsListing sends GET /v1/models as soon as the port accepts a
