@@ -75,6 +75,20 @@ func TestCodexPollQuotaCloakingOverridesAuthIdentityHeaders(t *testing.T) {
 			t.Errorf("%s Originator = %q, want %q like /responses", path, got, wantOriginator)
 		}
 	}
+	// Reset credits keeps the endpoint headers the Codex Desktop app sends.
+	reset := seen["/backend-api/wham/rate-limit-reset-credits"]
+	if reset == nil {
+		t.Fatalf("reset credits request not made; saw %v", seen)
+	}
+	if got := reset.Get("User-Agent"); got != wantUA {
+		t.Errorf("reset credits User-Agent = %q, want %q", got, wantUA)
+	}
+	if got := reset.Get("Originator"); got != "Codex Desktop" {
+		t.Errorf("reset credits Originator = %q, want Codex Desktop", got)
+	}
+	if got := reset.Get("OpenAI-Beta"); got != "codex-1" {
+		t.Errorf("reset credits OpenAI-Beta = %q, want codex-1", got)
+	}
 }
 
 func TestCodexPollQuotaUsesHeaderDefaultsUserAgentWithoutCloaking(t *testing.T) {
@@ -128,6 +142,9 @@ func TestCodexPollQuotaSendsOuterOAuthTokenForSIWCCredential(t *testing.T) {
 		}
 		if got := headers.Get("Authorization"); got != "Bearer outer-token" {
 			t.Errorf("%s Authorization = %q, want Bearer outer-token", path, got)
+		}
+		if got := headers.Get("User-Agent"); got != "my-agent/1.0" {
+			t.Errorf("%s User-Agent = %q, want the configured my-agent/1.0", path, got)
 		}
 	}
 }
