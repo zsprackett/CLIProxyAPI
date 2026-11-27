@@ -281,8 +281,11 @@ func TestClaudeExecutor_CountTokensKeepsClassifierSystemPrompt(t *testing.T) {
 	if got := system.Get("0.text").String(); got != classifierSystemPrompt {
 		t.Fatalf("system.0 = %q, want the classifier prompt; system=%s", got, system.Raw)
 	}
-	if got := system.Get("0.cache_control.ttl").String(); got != "1h" {
-		t.Fatalf("system.0 cache ttl = %q, want 1h; system=%s", got, system.Raw)
+	if got := system.Get("0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("system.0 cache_control.type = %q, want ephemeral; system=%s", got, system.Raw)
+	}
+	if ttl := system.Get("0.cache_control.ttl"); ttl.Exists() {
+		t.Fatalf("system.0 cache ttl = %s, want none: count_tokens sends no extended-cache-ttl beta; system=%s", ttl.Raw, system.Raw)
 	}
 	if got := system.Get("1.text").String(); got != "## Session Context" {
 		t.Fatalf("system.1 = %q, want the session context; system=%s", got, system.Raw)
