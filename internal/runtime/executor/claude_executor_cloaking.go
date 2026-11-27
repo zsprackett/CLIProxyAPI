@@ -945,7 +945,7 @@ func checkSystemInstructionsWithSigningModeAtDoc(
 
 	billingText := generateBillingHeader(cchSigning, version, messageText, entrypoint, workload, isSubagent, prevReq, promptID, turnOrigin...)
 	billingBlock := buildTextBlock(billingText, nil)
-	if !strictMode && helps.IsClaudeAutoModeClassifierRequest(doc) {
+	if claudeKeepsClassifierShapeDoc(doc, strictMode) {
 		keepClaudeClassifierSystemPromptDoc(doc, system, billingBlock)
 		return true
 	}
@@ -1213,12 +1213,30 @@ func validateClaudeCallerSystemBlocks(system ojson.Result) error {
 // system prompt would put the large stable prompt after the volatile
 // transcript and defeat prompt caching on every call.
 func keepClaudeClassifierSystemPromptDoc(doc *ojson.Doc, system ojson.Result, billingBlock string) {
-	blocks := []string{billingBlock}
+	blocks := append([]string{billingBlock}, claudeClassifierSystemBlocks(system)...)
+	_ = doc.SetRawBytes("system", []byte("["+strings.Join(blocks, ",")+"]"))
+}
+
+// claudeClassifierSystemBlocks rebuilds the classifier's system blocks with the
+// caller's cache_control only when it is a valid ephemeral marker with no ttl,
+// "5m", or "1h". Any other ttl would reach Anthropic as is, and TTL
+// normalization would also strip the 1h ttl from every later breakpoint.
+func claudeClassifierSystemBlocks(system ojson.Result) []string {
+	var blocks []string
 	for _, block := range collectForwardedClaudeSystemPromptBlocksWithCache(system) {
-		// Explicit mode keeps the caller's validated cache_control and drops a malformed one.
+		if ttl := ojson.Parse(block.RawCC).Get("ttl"); ttl.Exists() && (ttl.Type != ojson.String || (ttl.String() != "5m" && ttl.String() != "1h")) {
+			block.RawCC = ""
+		}
 		blocks = append(blocks, buildForwardedSystemBlock(block.Text, block, true))
 	}
-	_ = doc.SetRawBytes("system", []byte("["+strings.Join(blocks, ",")+"]"))
+	return blocks
+}
+
+// claudeKeepsClassifierShapeDoc reports whether a cloaked request is the
+// auto-mode classifier and keeps its own system blocks at the top level. The
+// Messages path and count_tokens share it so both see the same body.
+func claudeKeepsClassifierShapeDoc(doc *ojson.Doc, strictMode bool) bool {
+	return !strictMode && helps.IsClaudeAutoModeClassifierRequest(doc)
 }
 
 func collectForwardedClaudeSystemPromptBlocks(system ojson.Result) []string {

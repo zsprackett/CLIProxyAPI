@@ -213,7 +213,12 @@ func (e *ClaudeExecutor) countTokensUpstream(ctx context.Context, auth *cliproxy
 				return cliproxyexecutor.Response{}, errSystem
 			}
 		}
-		relocateClaudeSystemPromptForCountTokensWithPolicyDoc(doc, settings.strictMode, explicitCacheMode, !policy.OAuth)
+		if claudeKeepsClassifierShapeDoc(doc, settings.strictMode) {
+			// Count the classifier in the shape the Messages path sends it.
+			_ = doc.SetRawBytes("system", []byte("["+strings.Join(claudeClassifierSystemBlocks(doc.Get("system")), ",")+"]"))
+		} else {
+			relocateClaudeSystemPromptForCountTokensWithPolicyDoc(doc, settings.strictMode, explicitCacheMode, !policy.OAuth)
+		}
 		if matcher := settings.buildSensitiveWordMatcher(); matcher != nil {
 			helps.ObfuscateSensitiveWordsDoc(doc, matcher)
 		}
