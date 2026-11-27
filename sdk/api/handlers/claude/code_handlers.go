@@ -751,9 +751,10 @@ func claudeErrorDetailFromText(status int, errText string) (string, string) {
 // claudeErrorDetailsFromText returns the upstream error.details object, if any.
 func claudeErrorDetailsFromText(errText string) json.RawMessage {
 	details := ojson.Get(strings.TrimSpace(errText), "error.details")
-	// Get can return an object for malformed input; raw invalid JSON would
-	// make the whole envelope fail to marshal.
-	if !details.IsObject() || !ojson.Valid(details.Raw) {
+	// Get can return an object for malformed input, and json.Marshal rejects
+	// raw values that json.Valid rejects (including its depth limit, which
+	// ojson.Valid does not enforce). A rejected value would erase the envelope.
+	if !details.IsObject() || !json.Valid([]byte(details.Raw)) {
 		return nil
 	}
 	return json.RawMessage(details.Raw)
