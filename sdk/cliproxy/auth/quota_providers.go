@@ -209,6 +209,10 @@ func claudeSignalsRejectOverage(signals map[string]string) bool {
 			if strings.Contains(value, "overage") {
 				return true
 			}
+		case "anthropic-ratelimit-unified-overage-disabled-reason":
+			if value != "" {
+				return true
+			}
 		}
 	}
 	return false

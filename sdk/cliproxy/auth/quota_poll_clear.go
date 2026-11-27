@@ -44,23 +44,27 @@ func ownModelCooldownLayer(state *ModelState) *ModelState {
 type modelCooldownKeeper func(auth *Auth, model string, own *ModelState) bool
 
 // hasClearableQuotaCooldown is hasActiveQuotaCooldown without the model
-// cooldowns that keep reports as kept.
+// cooldowns that keep reports as kept. An auth-level "quota" reason is the
+// aggregate of the model cooldowns when any model has one, so the models
+// decide.
 func hasClearableQuotaCooldown(auth *Auth, now time.Time, keep modelCooldownKeeper) bool {
 	if auth == nil {
 		return false
 	}
-	if quotaCooldownActive(auth.Quota, now) {
-		return true
-	}
+	modelBlocked := false
 	for model, state := range auth.ModelStates {
 		if state == nil || !quotaCooldownActive(state.Quota, now) {
 			continue
 		}
+		modelBlocked = true
 		if own := ownModelCooldownLayer(state); own != state || !keep(auth, model, own) {
 			return true
 		}
 	}
-	return false
+	if !quotaCooldownActive(auth.Quota, now) {
+		return false
+	}
+	return auth.Quota.Reason == "credential_quota" || !modelBlocked
 }
 
 // hasActiveQuotaCooldown reports whether the auth, or any of its model states,
