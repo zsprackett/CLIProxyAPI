@@ -2,13 +2,13 @@ package executor
 
 import (
 	"context"
-	"encoding/base64"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/MoeForge/moego/base64"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )

@@ -7,12 +7,13 @@ package prices
 import (
 	"bytes"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/MoeForge/moego/json"
 )
 
 // Source says where a price came from.

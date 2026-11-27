@@ -3,13 +3,14 @@ package auth
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/MoeForge/moego/json"
 )
 
 var snapshotNow = time.Date(2026, 10, 19, 17, 30, 0, 0, time.UTC)

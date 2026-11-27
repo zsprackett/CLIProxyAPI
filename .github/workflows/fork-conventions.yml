@@ -1,0 +1,25 @@
+name: fork-conventions
+
+# Fork-only workflow, kept out of pr-test-build.yml so upstream syncs do not conflict.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  banned-imports:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Reject stdlib JSON, Base64 and regexp imports (AGENTS.md)
+        run: |
+          # conductor_refresh_disabled_test.go is an upstream file; fixing it here would conflict on sync.
+          hits=$(git grep -nE '^\s*(\w+\s+)?"(encoding/json|encoding/base64|regexp)"$' -- '*.go' ':!examples/' ':!docs/' \
+            ':!sdk/cliproxy/auth/conductor_refresh_disabled_test.go' || true)
+          if [ -n "$hits" ]; then
+            echo "Use github.com/MoeForge/moego/{json,base64,regexp} instead:"
+            echo "$hits"
+            exit 1
+          fi
