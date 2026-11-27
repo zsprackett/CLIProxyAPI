@@ -1,11 +1,15 @@
 package executor
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
@@ -38,7 +42,7 @@ func TestXAIChatProxyClientVersionMeetsServerFloor(t *testing.T) {
 	}
 }
 
-func TestXAIChatProxyIdentityHeadersDeriveFromOneConstant(t *testing.T) {
+func TestXAIChatProxyIdentityHeadersDeriveFromActiveVersion(t *testing.T) {
 	auth := &cliproxyauth.Auth{
 		Provider:   "xai",
 		Attributes: map[string]string{"auth_kind": "oauth"},
@@ -49,11 +53,12 @@ func TestXAIChatProxyIdentityHeadersDeriveFromOneConstant(t *testing.T) {
 	}
 	applyXAIChatHeaders(req, auth, "token", false, "")
 
-	if got := req.Header.Get(xaiClientVersionHeader); got != xaiClientVersionValue {
-		t.Fatalf("%s = %q, want %q", xaiClientVersionHeader, got, xaiClientVersionValue)
+	version := xaiClientVersion()
+	if got := req.Header.Get(xaiClientVersionHeader); got != version {
+		t.Fatalf("%s = %q, want %q", xaiClientVersionHeader, got, version)
 	}
-	if got, want := req.Header.Get("User-Agent"), "xai-grok-workspace/"+xaiClientVersionValue; got != want {
-		t.Fatalf("User-Agent = %q, want %q (must derive from xaiClientVersionValue)", got, want)
+	if got, want := req.Header.Get("User-Agent"), "xai-grok-workspace/"+version; got != want {
+		t.Fatalf("User-Agent = %q, want %q (must derive from xaiClientVersion())", got, want)
 	}
 }
 
@@ -95,5 +100,61 @@ func TestXAIChatProxyIdentityHeadersFollowDynamicVersion(t *testing.T) {
 	}
 	if got, want := req.Header.Get("User-Agent"), "xai-grok-workspace/1.2.34"; got != want {
 		t.Fatalf("User-Agent = %q, want %q", got, want)
+	}
+}
+
+func pollXAIBillingHeaders(t *testing.T, auth *cliproxyauth.Auth) []http.Header {
+	t.Helper()
+	var mu sync.Mutex
+	var seen []http.Header
+	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		mu.Lock()
+		seen = append(seen, req.Header.Clone())
+		mu.Unlock()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(xaiBillingMonthlyNoLimitBody)),
+			Request:    req,
+		}, nil
+	})
+	ctx := context.WithValue(context.Background(), "cliproxy.roundtripper", http.RoundTripper(transport))
+	if _, errPoll := NewXAIExecutor(&config.Config{}).PollQuota(ctx, auth, cliproxyauth.PollOnDemand); errPoll != nil {
+		t.Fatalf("PollQuota() error = %v", errPoll)
+	}
+	if len(seen) == 0 {
+		t.Fatal("PollQuota() made no billing request")
+	}
+	return seen
+}
+
+// The billing poll goes to the same cli-chat-proxy host as chat, so it must
+// send the same identity headers, including the npm-refreshed client version.
+func TestXAIPollQuotaSendsChatProxyIdentityHeaders(t *testing.T) {
+	restore := helps.SetXAIClientVersionForTest("1.2.34")
+	defer restore()
+
+	auth := &cliproxyauth.Auth{
+		Provider: "xai",
+		Metadata: map[string]any{"access_token": "token", "auth_kind": "oauth"},
+	}
+	chatReq, errReq := http.NewRequest(http.MethodPost, xaiChatBaseURL(auth)+"/chat/completions", nil)
+	if errReq != nil {
+		t.Fatal(errReq)
+	}
+	applyXAIChatHeaders(chatReq, auth, "token", false, "")
+
+	for i, headers := range pollXAIBillingHeaders(t, auth) {
+		if got := headers.Get(xaiClientVersionHeader); got != "1.2.34" {
+			t.Errorf("billing request %d %s = %q, want dynamic version 1.2.34", i, xaiClientVersionHeader, got)
+		}
+		if got, want := headers.Get("User-Agent"), "xai-grok-workspace/1.2.34"; got != want {
+			t.Errorf("billing request %d User-Agent = %q, want %q", i, got, want)
+		}
+		for _, name := range []string{xaiTokenAuthHeader, xaiClientIdentifierHeader, xaiAuthenticateResponseHeader} {
+			if got, want := headers.Get(name), chatReq.Header.Get(name); got != want {
+				t.Errorf("billing request %d %s = %q, want %q like chat", i, name, got, want)
+			}
+		}
 	}
 }

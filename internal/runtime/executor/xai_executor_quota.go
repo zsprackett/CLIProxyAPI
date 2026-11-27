@@ -50,10 +50,7 @@ func (e *XAIExecutor) fetchXAIBilling(ctx context.Context, auth *cliproxyauth.Au
 		return nil, fmt.Errorf("create xai billing request: %w", errRequest)
 	}
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("User-Agent", "xai-grok-workspace/"+xaiClientVersionValue)
-	req.Header.Set(xaiTokenAuthHeader, xaiTokenAuthValue)
-	req.Header.Set(xaiClientVersionHeader, xaiClientVersionValue)
-	req.Header.Set(xaiClientIdentifierHeader, xaiClientIdentifierValue)
+	applyXAICLIChatProxyIdentityHeaders(req.Header)
 	if userID := xaiMetadataString(auth.Metadata, "sub"); userID != "" {
 		req.Header.Set("x-userid", userID)
 	}

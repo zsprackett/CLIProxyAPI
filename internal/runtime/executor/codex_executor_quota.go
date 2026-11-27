@@ -31,7 +31,8 @@ func (e *CodexExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth, 
 	if e == nil || auth == nil || codexAuthUsesAPIKey(auth) {
 		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
-	if token, _ := codexCreds(auth); strings.TrimSpace(token) == "" {
+	// Check the token the fetch sends: the outer OAuth token, even for SIWC.
+	if token, _ := codexCredsForRequest(cliproxyauth.WithCodexClientRequest(ctx, true), auth); strings.TrimSpace(token) == "" {
 		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
 	accountID := codexQuotaAccountID(auth)
@@ -115,21 +116,34 @@ func codexQuotaJSON(value any) ojson.Result {
 	return ojson.ParseBytes(raw)
 }
 
+// fetchCodexQuotaJSON sends the User-Agent and Originator that /responses
+// sends: the codex-header-defaults User-Agent, then auth header rules, then
+// cloaking. The endpoint headers in extra are applied last.
 func (e *CodexExecutor) fetchCodexQuotaJSON(ctx context.Context, auth *cliproxyauth.Auth, rawURL, accountID string, extra map[string]string) ([]byte, error) {
+	// The usage endpoints take the outer OAuth token. codexCredsForRequest, in
+	// PrepareRequest, picks the SIWC token for a non-Codex User-Agent, and
+	// codex-header-defaults can set one, so the poll is marked as a Codex
+	// client request.
+	ctx = cliproxyauth.WithCodexClientRequest(ctx, true)
 	req, errRequest := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if errRequest != nil {
 		return nil, fmt.Errorf("create codex quota request: %w", errRequest)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", codexUserAgent)
+	cfgUserAgent, _ := codexHeaderDefaults(e.cfg, auth)
+	ensureHeaderWithConfigPrecedence(req.Header, nil, "User-Agent", cfgUserAgent, codexUserAgent)
 	req.Header.Set("Originator", codexOriginator)
 	if accountID != "" {
 		req.Header.Set("Chatgpt-Account-Id", accountID)
 	}
+	if errPrepare := e.PrepareRequest(req, auth); errPrepare != nil {
+		return nil, fmt.Errorf("prepare %s: %w", req.URL.Path, errPrepare)
+	}
+	applyCodexCloakingHeaders(req.Header, e.cfg, auth)
 	for name, value := range extra {
 		req.Header.Set(name, value)
 	}
-	resp, errDo := e.HttpRequest(ctx, auth, req)
+	resp, errDo := helps.NewUtlsHTTPClient(ctx, e.cfg, auth, 0).Do(req)
 	if errDo != nil {
 		return nil, fmt.Errorf("fetch %s: %w", req.URL.Path, errDo)
 	}

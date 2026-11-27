@@ -427,13 +427,19 @@ func applyXAIChatHeaders(r *http.Request, auth *cliproxyauth.Auth, token string,
 		return
 	}
 	applyXAIDefaultHeaders(r, token, stream, sessionID)
-	clientVer := xaiClientVersion()
-	r.Header.Set(xaiTokenAuthHeader, xaiTokenAuthValue)
-	r.Header.Set(xaiClientVersionHeader, clientVer)
-	r.Header.Set("User-Agent", "xai-grok-workspace/"+clientVer)
-	r.Header.Set(xaiClientIdentifierHeader, xaiClientIdentifierValue)
-	r.Header.Set(xaiAuthenticateResponseHeader, xaiAuthenticateResponseValue)
+	applyXAICLIChatProxyIdentityHeaders(r.Header)
 	applyXAICustomHeaders(r, auth, clientHeaders...)
+}
+
+// applyXAICLIChatProxyIdentityHeaders sets the Grok CLI identity that
+// cli-chat-proxy.grok.com checks on every request, chat and billing alike.
+func applyXAICLIChatProxyIdentityHeaders(headers http.Header) {
+	clientVer := xaiClientVersion()
+	headers.Set(xaiTokenAuthHeader, xaiTokenAuthValue)
+	headers.Set(xaiClientVersionHeader, clientVer)
+	headers.Set("User-Agent", "xai-grok-workspace/"+clientVer)
+	headers.Set(xaiClientIdentifierHeader, xaiClientIdentifierValue)
+	headers.Set(xaiAuthenticateResponseHeader, xaiAuthenticateResponseValue)
 }
 
 func xaiResolveComposerSessionID(ctx context.Context, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, baseModel string) (string, error) {
