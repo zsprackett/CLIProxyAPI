@@ -3078,9 +3078,26 @@ func lastCacheableClaudeSystemIndex(system ojson.Result) int {
 // main-conversation request should be upgraded to the 1h cache. Claude Code picks
 // 1h itself only when logged in with a subscription; through the proxy it sees an
 // API key and picks 5m, although the upstream credential is a subscription. The
-// extended-cache-ttl beta is already sent for these requests.
-func claudeNativeMainCacheTTL1h(cfg *config.Config, fp claudeFingerprintPolicy, confirmedClaudeCode, isSubagent, isProbeOrHelper bool) bool {
-	return cfg != nil && cfg.ClaudeCode.MainCacheTTL1h && confirmedClaudeCode && fp.AuthIsOAuthToken && !isSubagent && !isProbeOrHelper
+// extended-cache-ttl beta is already sent for these requests, unless the operator
+// header policy removes it: a 1h body without the beta fails upstream and Thread
+// validation, so the upgrade defers to that policy instead of overriding it.
+func claudeNativeMainCacheTTL1h(cfg *config.Config, auth *cliproxyauth.Auth, fp claudeFingerprintPolicy, confirmedClaudeCode, isSubagent, isProbeOrHelper bool) bool {
+	if cfg == nil || !cfg.ClaudeCode.MainCacheTTL1h || !confirmedClaudeCode || !fp.AuthIsOAuthToken || isSubagent || isProbeOrHelper {
+		return false
+	}
+	for _, beta := range cfg.ClaudeHeaderDefaults.AnthropicBetaStrip {
+		if strings.TrimSpace(beta) == claudeExtendedCacheTTLBeta {
+			return false
+		}
+	}
+	if auth != nil {
+		for name, value := range auth.Attributes {
+			if strings.EqualFold(name, "header:Anthropic-Beta") && !claudeRequestedBetas(value, nil)[claudeExtendedCacheTTLBeta] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func upgradeClaudeCacheControlTTL(payload []byte, ttl string) []byte {
