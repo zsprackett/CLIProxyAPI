@@ -473,7 +473,7 @@ func (e *ClaudeExecutor) prepareClaudeThreadBetas(ctx context.Context, request *
 	betaAttrs := make(map[string]string)
 	if auth != nil && !isAnthropicUpstreamURL(request.URL) {
 		for name, value := range auth.Attributes {
-			if strings.EqualFold(name, "header:Anthropic-Beta") {
+			if header, ok := util.CustomHeaderName(name); ok && header == "Anthropic-Beta" {
 				customBetas = append(customBetas, value)
 				betaAttrs[name] = value
 			}
