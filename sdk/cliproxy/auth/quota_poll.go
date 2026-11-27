@@ -320,11 +320,14 @@ func (m *Manager) clearCooldownIfPollShowsCapacity(ctx context.Context, target *
 	if m.HomeEnabled() || !pollShowsQuotaCapacity(obs) {
 		return
 	}
+	keep := func(auth *Auth, model string, own *ModelState) bool {
+		return pollKeepsModelCooldown(obs, auth, model, own, now)
+	}
 	guard := func(auth *Auth) bool {
-		return hasActiveQuotaCooldown(auth, now) &&
+		return hasClearableQuotaCooldown(auth, now, keep) &&
 			cooldownRecordsUnchanged(baseline, m.cooldownStateRecordsForAuthLocked(auth, pollStart))
 	}
-	cleared, _, errReset := m.resetQuota(ctx, target.ID, guard)
+	cleared, _, errReset := m.resetQuota(ctx, target.ID, guard, keep)
 	if errReset != nil {
 		log.WithFields(log.Fields{"auth_id": target.ID, "provider": target.Provider}).Warnf("quota poll cooldown clear failed: %v", errReset)
 		return

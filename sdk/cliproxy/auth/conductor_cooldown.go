@@ -1159,14 +1159,16 @@ func dedupeStrings(values []string) []string {
 
 // ResetQuota clears quota/cooldown state for an auth and resumes registry routing.
 func (m *Manager) ResetQuota(ctx context.Context, authID string) (*Auth, []string, error) {
-	return m.resetQuota(ctx, authID, nil)
+	return m.resetQuota(ctx, authID, nil, nil)
 }
 
-// resetQuota is ResetQuota with an optional guard. The guard runs under m.mu
-// right after the auth is found, so a caller can check state and clear it
-// atomically. A guard that returns false leaves the auth untouched and yields
-// (nil, nil, nil).
-func (m *Manager) resetQuota(ctx context.Context, authID string, guard func(*Auth) bool) (*Auth, []string, error) {
+// resetQuota is ResetQuota with an optional guard and keep. The guard runs
+// under m.mu right after the auth is found, so a caller can check state and
+// clear it atomically. A guard that returns false leaves the auth untouched
+// and yields (nil, nil, nil). keep selects model cooldowns that survive the
+// reset: the model keeps its own layer, without any propagated credential
+// quota over it.
+func (m *Manager) resetQuota(ctx context.Context, authID string, guard func(*Auth) bool, keep modelCooldownKeeper) (*Auth, []string, error) {
 	if m == nil {
 		return nil, nil, nil
 	}
@@ -1200,6 +1202,15 @@ func (m *Manager) resetQuota(ctx context.Context, authID string, guard func(*Aut
 		cooldownRecordsBefore = m.cooldownStateRecordsForAuthLocked(auth, now)
 	}
 
+	kept := make(map[string]*ModelState)
+	if keep != nil {
+		for modelKey, state := range auth.ModelStates {
+			if own := ownModelCooldownLayer(state); own != nil && keep(auth, modelKey, own) {
+				kept[modelKey] = own.cloneShallow()
+			}
+		}
+	}
+
 	for modelKey, state := range auth.ModelStates {
 		if strings.TrimSpace(modelKey) == "" {
 			continue
@@ -1214,6 +1225,14 @@ func (m *Manager) resetQuota(ctx context.Context, authID string, guard func(*Aut
 			models = append(models, registeredModels...)
 		}
 	} else if len(auth.ModelStates) > 0 {
+		updateAggregatedAvailability(auth, now)
+	}
+	if len(kept) > 0 {
+		for modelKey, own := range kept {
+			own.credentialQuotaPropagated = false
+			own.UpdatedAt = now
+			auth.ModelStates[modelKey] = own
+		}
 		updateAggregatedAvailability(auth, now)
 	}
 
