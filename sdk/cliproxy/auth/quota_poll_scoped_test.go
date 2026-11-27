@@ -209,6 +209,40 @@ func TestQuotaPollClearsCredentialCooldownButKeepsFableCooldown(t *testing.T) {
 	assertModelRoutable(t, manager, scopedFableModel, false)
 }
 
+func TestQuotaPollFableCooldownWithoutPolledWindowFollowsSnapshot(t *testing.T) {
+	for name, tc := range map[string]struct {
+		utilization string
+		want        bool
+	}{
+		"snapshot full":     {utilization: "1.0", want: false},
+		"snapshot has room": {utilization: "0.5", want: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			manager, authID := newScopedPollManager(t, claudePollSpec{fiveHour: 20, sevenDay: 40})
+			markModelRateLimit(manager, authID, scopedFableModel, quotaTestHeaders(
+				"Anthropic-Ratelimit-Unified-7d_oi-Utilization", tc.utilization,
+			))
+			assertModelRoutable(t, manager, scopedFableModel, false)
+			pollOnce(t, manager, authID)
+			assertModelRoutable(t, manager, scopedFableModel, tc.want)
+		})
+	}
+}
+
+func TestQuotaPollClearsFableOverageCooldownOnceFableWindowHasRoom(t *testing.T) {
+	headers := fableOnlyRejection()
+	headers.Set("Anthropic-Ratelimit-Unified-Overage-Status", "rejected")
+	headers.Set("Anthropic-Ratelimit-Unified-Representative-Claim", "seven_day_overage_included")
+	manager, authID := newScopedPollManager(t, claudePollSpec{
+		fiveHour: 20, sevenDay: 40, fable: percentPtr(30),
+		extra: &ClaudeExtraUsage{Enabled: true, Utilization: KnownPercent(100)},
+	})
+	markModelRateLimit(manager, authID, scopedFableModel, headers)
+	assertModelRoutable(t, manager, scopedFableModel, false)
+	pollOnce(t, manager, authID)
+	assertModelRoutable(t, manager, scopedFableModel, true)
+}
+
 func TestQuotaPollClearsOpusCooldownButKeepsFableCooldown(t *testing.T) {
 	manager, authID := newScopedPollManager(t, claudePollSpec{fiveHour: 20, sevenDay: 40, fable: percentPtr(100)})
 	markModelRateLimit(manager, authID, scopedFableModel, fableOnlyRejection())

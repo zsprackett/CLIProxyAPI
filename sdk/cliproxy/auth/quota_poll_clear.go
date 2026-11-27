@@ -15,6 +15,54 @@ func pollShowsQuotaCapacity(obs QuotaObservation) bool {
 	return row.showsCapacity(obs)
 }
 
+// pollKeepsModelCooldown reports whether a poll that shows account capacity
+// must still keep the own cooldown of model, because the provider rule says
+// the cause of that cooldown has not recovered.
+func pollKeepsModelCooldown(obs QuotaObservation, auth *Auth, model string, own *ModelState, now time.Time) bool {
+	row, ok := quotaProviders[obs.Provider]
+	if !ok || row.modelCooldownHolds == nil || own == nil || !quotaCooldownActive(own.Quota, now) {
+		return false
+	}
+	return row.modelCooldownHolds(obs, QuotaWindowsForAuth(auth), model, own.Quota)
+}
+
+// ownModelCooldownLayer returns the layer that holds the model's own failures:
+// the state itself, or the independent shadow under a propagated credential
+// quota. It is nil when only the propagated layer exists.
+func ownModelCooldownLayer(state *ModelState) *ModelState {
+	if state == nil {
+		return nil
+	}
+	if state.credentialQuotaPropagated || state.Quota.Reason == "credential_quota" {
+		return state.credentialQuotaShadow
+	}
+	return state
+}
+
+// modelCooldownKeeper reports whether a reset keeps the own cooldown layer of
+// a model. It runs under m.mu.
+type modelCooldownKeeper func(auth *Auth, model string, own *ModelState) bool
+
+// hasClearableQuotaCooldown is hasActiveQuotaCooldown without the model
+// cooldowns that keep reports as kept.
+func hasClearableQuotaCooldown(auth *Auth, now time.Time, keep modelCooldownKeeper) bool {
+	if auth == nil {
+		return false
+	}
+	if quotaCooldownActive(auth.Quota, now) {
+		return true
+	}
+	for model, state := range auth.ModelStates {
+		if state == nil || !quotaCooldownActive(state.Quota, now) {
+			continue
+		}
+		if own := ownModelCooldownLayer(state); own != state || !keep(auth, model, own) {
+			return true
+		}
+	}
+	return false
+}
+
 // hasActiveQuotaCooldown reports whether the auth, or any of its model states,
 // is blocked by a quota cooldown whose deadline is still ahead.
 func hasActiveQuotaCooldown(auth *Auth, now time.Time) bool {
