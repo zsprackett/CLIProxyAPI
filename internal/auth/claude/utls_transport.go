@@ -43,6 +43,21 @@ var claudeOAuthInspectHeaderOrder = []string{
 	"Connection",
 }
 
+// claudeOAuthUsageHeaderOrder is the inspect order plus the OAuth beta, which
+// only the usage GET sends. The lowercase name is the wire form: the ordered
+// conn rewrites the Go canonical casing to it.
+var claudeOAuthUsageHeaderOrder = []string{
+	"Accept",
+	"Content-Type",
+	"Authorization",
+	"anthropic-beta",
+	"Cache-Control",
+	"User-Agent",
+	"Accept-Encoding",
+	"Host",
+	"Connection",
+}
+
 // claudeOAuthInspectTargets are the authenticated control-plane GET paths that
 // use claudeOAuthInspectHeaderOrder.
 var claudeOAuthInspectTargets = []string{
@@ -50,8 +65,13 @@ var claudeOAuthInspectTargets = []string{
 	"/api/oauth/claude_cli/roles",
 }
 
+const claudeOAuthUsageTarget = "/api/oauth/usage"
+
 func claudeOAuthRequestHeaderOrder(method, requestTarget string) []string {
 	if method == http.MethodGet {
+		if strings.HasPrefix(requestTarget, claudeOAuthUsageTarget) {
+			return claudeOAuthUsageHeaderOrder
+		}
 		for _, target := range claudeOAuthInspectTargets {
 			if strings.HasPrefix(requestTarget, target) {
 				return claudeOAuthInspectHeaderOrder
