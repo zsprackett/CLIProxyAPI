@@ -57,6 +57,16 @@ func TestRunFirstModelListingHonorsStoredCodexFreePlan(t *testing.T) {
 	}
 }
 
+func TestRunFirstModelListingHonorsStoredCredentialModelAliases(t *testing.T) {
+	body := firstModelsListingWithWatcherHeld(t, map[string]string{
+		"claude-alias@example.com.json": `{"type":"claude","email":"alias@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startupalias","model_aliases":[{"name":"claude-opus-5","alias":"opus-startup-alias"}]}`,
+	})
+
+	if !strings.Contains(body, `"id":"startupalias/opus-startup-alias"`) {
+		t.Fatalf("first /v1/models listing lacks the credential's model alias startupalias/opus-startup-alias:\n%s", body)
+	}
+}
+
 // firstModelsListingWithWatcherHeld starts the service with the given auth
 // files and returns the first /v1/models listing. The watcher factory blocks
 // until that listing is read, so it shows only what the service published
