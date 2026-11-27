@@ -231,3 +231,72 @@ func TestClaudeExecutor_ClassifierDropsMalformedCacheControl(t *testing.T) {
 		})
 	}
 }
+
+// An ephemeral cache_control with a ttl Anthropic does not accept is dropped
+// from a classifier system block. Kept as is, it reached the upstream and made
+// TTL normalization strip the valid 1h ttl from every later breakpoint.
+func TestClaudeExecutor_ClassifierDropsCacheControlWithInvalidTTL(t *testing.T) {
+	payload := []byte(`{"model":"claude-sonnet-5","max_tokens":64,"thinking":{"type":"disabled"},` +
+		`"system":[` +
+		`{"type":"text","text":"` + classifierSystemPrompt + `","cache_control":{"type":"ephemeral","ttl":"forever"}},` +
+		`{"type":"text","text":"## Session Context","cache_control":{"type":"ephemeral","ttl":"1h"}}],` +
+		`"messages":[{"role":"user","content":[{"type":"text","text":"<transcript>tool call 42</transcript>"}]}]}`)
+	for _, mode := range classifierModes() {
+		t.Run(mode.name, func(t *testing.T) {
+			auth, cfg := classifierOAuth()
+			body := sendClassifierRequestWithAuth(t, mode.stream, payload, auth, cfg)
+
+			if strings.Contains(string(body), "forever") {
+				t.Fatalf("upstream body carries the invalid ttl: %s", ojson.GetBytes(body, "system").Raw)
+			}
+			if got := ojson.GetBytes(body, "system.1.text").String(); got != classifierSystemPrompt {
+				t.Fatalf("system.1 = %q, want the classifier prompt; system=%s", got, ojson.GetBytes(body, "system").Raw)
+			}
+			if got := ojson.GetBytes(body, "system.2.cache_control.ttl").String(); got != "1h" {
+				t.Fatalf("system.2 cache ttl = %q, want the valid 1h breakpoint kept; system=%s", got, ojson.GetBytes(body, "system").Raw)
+			}
+		})
+	}
+}
+
+// count_tokens counts the classifier request in the shape Execute sends it:
+// the classifier system blocks stay in the system field, not after the
+// transcript.
+func TestClaudeExecutor_CountTokensKeepsClassifierSystemPrompt(t *testing.T) {
+	upstream := &midSystemUpstream{}
+	auth, cfg := classifierOAuth()
+	ex := NewClaudeExecutor(cfg)
+	ctx := upstream.context(t, nil)
+	if _, err := ex.CountTokens(ctx, auth, cliproxyexecutor.Request{
+		Model: "claude-sonnet-5", Payload: classifierPayload(classifierSystemPrompt),
+	}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatClaude}); err != nil {
+		t.Fatalf("CountTokens() error = %v", err)
+	}
+	if !upstream.called {
+		t.Fatal("expected the request to reach the upstream")
+	}
+	body := upstream.body
+
+	system := ojson.GetBytes(body, "system")
+	if got := system.Get("0.text").String(); got != classifierSystemPrompt {
+		t.Fatalf("system.0 = %q, want the classifier prompt; system=%s", got, system.Raw)
+	}
+	if got := system.Get("0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("system.0 cache_control.type = %q, want ephemeral; system=%s", got, system.Raw)
+	}
+	if ttl := system.Get("0.cache_control.ttl"); ttl.Exists() {
+		t.Fatalf("system.0 cache ttl = %s, want none: count_tokens sends no extended-cache-ttl beta; system=%s", ttl.Raw, system.Raw)
+	}
+	if got := system.Get("1.text").String(); got != "## Session Context" {
+		t.Fatalf("system.1 = %q, want the session context; system=%s", got, system.Raw)
+	}
+	messages := ojson.GetBytes(body, "messages").Array()
+	if len(messages) != 2 {
+		t.Fatalf("messages has %d turns, want the caller's 2 user turns; messages=%s", len(messages), ojson.GetBytes(body, "messages").Raw)
+	}
+	for i, message := range messages {
+		if role := message.Get("role").String(); role != "user" {
+			t.Fatalf("messages.%d role = %q, want user", i, role)
+		}
+	}
+}
