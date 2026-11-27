@@ -31,7 +31,8 @@ func (e *CodexExecutor) PollQuota(ctx context.Context, auth *cliproxyauth.Auth, 
 	if e == nil || auth == nil || codexAuthUsesAPIKey(auth) {
 		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
-	if token, _ := codexCreds(auth); strings.TrimSpace(token) == "" {
+	// Check the token the fetch sends: the outer OAuth token, even for SIWC.
+	if token, _ := codexCredsForRequest(cliproxyauth.WithCodexClientRequest(ctx, true), auth); strings.TrimSpace(token) == "" {
 		return cliproxyauth.QuotaObservation{}, cliproxyauth.ErrQuotaNotPollable
 	}
 	accountID := codexQuotaAccountID(auth)
