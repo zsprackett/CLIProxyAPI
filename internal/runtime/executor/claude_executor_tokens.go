@@ -216,6 +216,9 @@ func (e *ClaudeExecutor) countTokensUpstream(ctx context.Context, auth *cliproxy
 		if claudeKeepsClassifierShapeDoc(doc, settings.strictMode) {
 			// Count the classifier in the shape the Messages path sends it.
 			_ = doc.SetRawBytes("system", []byte("["+strings.Join(claudeClassifierSystemBlocks(doc.Get("system")), ",")+"]"))
+			// count_tokens sends no extended-cache-ttl beta, and a ttl does not
+			// change the count.
+			stripClaudeCacheControlTTLDoc(doc)
 		} else {
 			relocateClaudeSystemPromptForCountTokensWithPolicyDoc(doc, settings.strictMode, explicitCacheMode, !policy.OAuth)
 		}
