@@ -530,7 +530,10 @@ func (h *ClaudeCodeAPIHandler) forwardClaudeStreamWithState(c *gin.Context, flus
 			}
 			state.ensureSSEEventBoundary(c.Writer)
 
-			errorBytes, _ := json.Marshal(h.toClaudeError(errMsg))
+			errorBytes, errMarshal := json.Marshal(h.toClaudeError(errMsg))
+			if errMarshal != nil {
+				errorBytes = []byte(claudeFallbackErrorBody)
+			}
 			_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errorBytes)
 		},
 		CloseError: func() *interfaces.ErrorMessage {
@@ -608,17 +611,25 @@ func (h *ClaudeCodeAPIHandler) toClaudeErrorWithRetryAfter(msg *interfaces.Error
 			Details: claudeErrorDetailsFromText(errText),
 		},
 	}
-	if clienterror.IsClaudeThreadNotFound(status, errors.New(errText)) && !ojson.GetBytes(response.Error.Details, "error_code").Exists() {
+	if clienterror.IsClaudeThreadNotFound(status, errors.New(errText)) && !hasClaudeErrorCode(response.Error.Details) {
 		details := []byte(response.Error.Details)
 		if len(details) == 0 {
 			details = []byte("{}")
 		}
-		if marked, errSet := ojson.SetBytes(details, "error_code", "thread_not_found"); errSet == nil {
-			response.Error.Details = marked
+		doc := ojson.NewDoc(details)
+		if errSet := doc.Set("error_code", "thread_not_found"); errSet == nil {
+			response.Error.Details = doc.Bytes()
 		}
 	}
 	return response
 }
+
+func hasClaudeErrorCode(details json.RawMessage) bool {
+	code := ojson.GetBytes(details, "error_code")
+	return code.Type == ojson.String && strings.TrimSpace(code.String()) != ""
+}
+
+const claudeFallbackErrorBody = `{"type":"error","error":{"type":"api_error","message":"Internal Server Error"}}`
 
 func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.ErrorMessage) {
 	status := http.StatusInternalServerError
@@ -679,7 +690,7 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 
 	body, err := json.Marshal(h.toClaudeErrorWithRetryAfter(msg, retryAfter))
 	if err != nil {
-		body = []byte(`{"type":"error","error":{"type":"api_error","message":"Internal Server Error"}}`)
+		body = []byte(claudeFallbackErrorBody)
 	}
 	appendClaudeAPIResponse(c, body)
 	if !c.Writer.Written() {
@@ -740,7 +751,9 @@ func claudeErrorDetailFromText(status int, errText string) (string, string) {
 // claudeErrorDetailsFromText returns the upstream error.details object, if any.
 func claudeErrorDetailsFromText(errText string) json.RawMessage {
 	details := ojson.Get(strings.TrimSpace(errText), "error.details")
-	if !details.IsObject() {
+	// Get can return an object for malformed input; raw invalid JSON would
+	// make the whole envelope fail to marshal.
+	if !details.IsObject() || !ojson.Valid(details.Raw) {
 		return nil
 	}
 	return json.RawMessage(details.Raw)
