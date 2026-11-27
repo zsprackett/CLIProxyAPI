@@ -1183,3 +1183,31 @@ func TestClaudeErrorKeepsMissingThreadUpstreamErrorCode(t *testing.T) {
 		t.Fatalf("error.details.error_code = %q, want thread_expired; body=%s", got, body)
 	}
 }
+
+func TestWriteClaudeErrorResponseDropsTooDeepUpstreamDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	handler := &ClaudeCodeAPIHandler{}
+
+	const depth = 10001
+	details := strings.Repeat(`{"a":`, depth) + "1" + strings.Repeat("}", depth)
+	upstream := `{"type":"error","error":{"type":"invalid_request_error","message":"real message","details":` + details + `}}`
+	handler.WriteErrorResponse(c, &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadRequest,
+		Error:      errors.New(upstream),
+	})
+
+	// The depth also fails json.Unmarshal of the whole text, so the message
+	// is the raw upstream text, as for other unparsable upstream errors.
+	body := recorder.Body.Bytes()
+	if got := ojson.GetBytesNoCopy(body, "error.type").String(); got != "invalid_request_error" {
+		t.Fatalf("error.type = %q, want invalid_request_error; body=%.200s", got, body)
+	}
+	if got := ojson.GetBytesNoCopy(body, "error.message").String(); got != upstream {
+		t.Fatalf("error.message = %.200q, want the raw upstream error", got)
+	}
+	if ojson.GetBytesNoCopy(body, "error.details").Exists() {
+		t.Fatalf("too deep details forwarded; body=%.200s", body)
+	}
+}
