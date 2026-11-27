@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // When a client lists models the moment the proxy accepts connections, it sees
@@ -67,11 +69,94 @@ func TestRunFirstModelListingHonorsStoredCredentialModelAliases(t *testing.T) {
 	}
 }
 
+// The Postgres, git, and object stores mirror their credentials into the auth
+// directory but set their own source_backend. Their credential rules must hold
+// in the first listing too.
+func TestRunFirstModelListingHonorsRulesOfNonFileStoreCredentials(t *testing.T) {
+	var sourceBackend string
+	body := firstModelsListingWithWatcherHeldStore(t, map[string]string{
+		"codex-pgfree@example.com.json":      `{"type":"codex","email":"pgfree@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startuppgfree","plan_type":"free"}`,
+		"claude-pgexcluded@example.com.json": `{"type":"claude","email":"pgexcluded@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startuppgexcluded","excluded_models":["claude-opus-5"]}`,
+	}, newPostgresLikeStore, func(service *Service) {
+		if auth, ok := service.coreManager.GetByID("claude-pgexcluded@example.com.json"); ok {
+			sourceBackend = auth.Attributes[coreauth.AttributeSourceBackend]
+		}
+	})
+
+	if strings.Contains(body, `"id":"startuppgfree/gpt-6-astra"`) {
+		t.Fatalf("first /v1/models listing exposes the Pro-only model startuppgfree/gpt-6-astra for a Free postgres credential:\n%s", body)
+	}
+	if strings.Contains(body, `"id":"startuppgexcluded/claude-opus-5"`) {
+		t.Fatalf("first /v1/models listing exposes startuppgexcluded/claude-opus-5, which the postgres credential excludes:\n%s", body)
+	}
+	if !strings.Contains(body, `"id":"startuppgfree/gpt-6-luna"`) {
+		t.Fatalf("first /v1/models listing lacks the Free model startuppgfree/gpt-6-luna of the postgres credential:\n%s", body)
+	}
+	if !strings.Contains(body, `"id":"startuppgexcluded/`) {
+		t.Fatalf("first /v1/models listing lacks the models of the postgres credential:\n%s", body)
+	}
+	if sourceBackend != coreauth.AuthSourcePostgres {
+		t.Fatalf("before the watcher's first scan, source_backend = %q, want %q", sourceBackend, coreauth.AuthSourcePostgres)
+	}
+}
+
+// The watcher's scan covers only the top level of the auth directory, so the
+// startup batch must not publish a credential from a subdirectory, such as an
+// archived account.
+func TestRunFirstModelListingSkipsNestedCredentialFiles(t *testing.T) {
+	// After the watcher starts, the plugin model sync registers every loaded
+	// credential and nothing unregisters it at shutdown, so a fixed prefix
+	// would leak into the next run under -count.
+	archived := fmt.Sprintf("startuparchived%d", time.Now().UnixNano())
+	body := firstModelsListingWithWatcherHeld(t, map[string]string{
+		"claude-top@example.com.json":   `{"type":"claude","email":"top@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"startuptop"}`,
+		"archive/" + archived + ".json": `{"type":"claude","email":"old@example.com","access_token":"fake","expired":"2099-01-01T00:00:00Z","prefix":"` + archived + `"}`,
+	})
+
+	if !strings.Contains(body, `"id":"startuptop/claude-opus-5"`) {
+		t.Fatalf("first /v1/models listing lacks the top-level credential's model startuptop/claude-opus-5:\n%s", body)
+	}
+	if strings.Contains(body, `"id":"`+archived+`/`) {
+		t.Fatalf("first /v1/models listing exposes the models of archive/%s.json, which the watcher's scan skips:\n%s", archived, body)
+	}
+}
+
+// postgresLikeStore reads the auth directory like the Postgres store reads its
+// spool, and marks each credential with source_backend postgres.
+type postgresLikeStore struct {
+	*sdkAuth.FileTokenStore
+}
+
+func newPostgresLikeStore(authDir string) coreauth.Store {
+	store := sdkAuth.NewFileTokenStore()
+	store.SetBaseDir(authDir)
+	return postgresLikeStore{FileTokenStore: store}
+}
+
+func (s postgresLikeStore) List(ctx context.Context) ([]*coreauth.Auth, error) {
+	auths, errList := s.FileTokenStore.List(ctx)
+	for _, auth := range auths {
+		if auth.Attributes == nil {
+			auth.Attributes = make(map[string]string)
+		}
+		auth.Attributes[coreauth.AttributeSourceBackend] = coreauth.AuthSourcePostgres
+	}
+	return auths, errList
+}
+
 // firstModelsListingWithWatcherHeld starts the service with the given auth
 // files and returns the first /v1/models listing. The watcher factory blocks
 // until that listing is read, so it shows only what the service published
 // before the watcher's first scan.
 func firstModelsListingWithWatcherHeld(t *testing.T, authFiles map[string]string) string {
+	t.Helper()
+	return firstModelsListingWithWatcherHeldStore(t, authFiles, nil, nil)
+}
+
+// firstModelsListingWithWatcherHeldStore is firstModelsListingWithWatcherHeld
+// with an optional store over the auth directory, and an optional inspect
+// callback that runs after the listing is read and before the watcher starts.
+func firstModelsListingWithWatcherHeldStore(t *testing.T, authFiles map[string]string, newStore func(authDir string) coreauth.Store, inspect func(*Service)) string {
 	t.Helper()
 	dir := t.TempDir()
 	authDir := filepath.Join(dir, "auths")
@@ -79,6 +164,9 @@ func firstModelsListingWithWatcherHeld(t *testing.T, authFiles map[string]string
 		t.Fatal(errMkdir)
 	}
 	for name, content := range authFiles {
+		if errMkdir := os.MkdirAll(filepath.Dir(filepath.Join(authDir, name)), 0o700); errMkdir != nil {
+			t.Fatal(errMkdir)
+		}
 		if errWrite := os.WriteFile(filepath.Join(authDir, name), []byte(content), 0o600); errWrite != nil {
 			t.Fatal(errWrite)
 		}
@@ -109,7 +197,11 @@ oauth:
 		<-releaseWatcher
 		return defaultWatcherFactory(configPath, authDir, reload)
 	}
-	service, errBuild := NewBuilder().WithConfig(cfg).WithConfigPath(configPath).WithWatcherFactory(heldWatcherFactory).Build()
+	builder := NewBuilder().WithConfig(cfg).WithConfigPath(configPath).WithWatcherFactory(heldWatcherFactory)
+	if newStore != nil {
+		builder = builder.WithCoreAuthManager(coreauth.NewManager(newStore(cfg.AuthDir), nil, nil))
+	}
+	service, errBuild := builder.Build()
 	if errBuild != nil {
 		t.Fatalf("build service: %v", errBuild)
 	}
@@ -134,6 +226,9 @@ oauth:
 	})
 
 	body := firstModelsListing(t, port, done)
+	if inspect != nil {
+		inspect(service)
+	}
 	release()
 	return body
 }
