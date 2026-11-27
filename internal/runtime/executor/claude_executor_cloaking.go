@@ -945,7 +945,7 @@ func checkSystemInstructionsWithSigningModeAtDoc(
 
 	billingText := generateBillingHeader(cchSigning, version, messageText, entrypoint, workload, isSubagent, prevReq, promptID, turnOrigin...)
 	billingBlock := buildTextBlock(billingText, nil)
-	if !strictMode && helps.IsClaudeAutoModeClassifierSystem(system) {
+	if !strictMode && helps.IsClaudeAutoModeClassifierRequest(doc) {
 		keepClaudeClassifierSystemPromptDoc(doc, system, billingBlock)
 		return true
 	}
@@ -1214,18 +1214,10 @@ func validateClaudeCallerSystemBlocks(system ojson.Result) error {
 // transcript and defeat prompt caching on every call.
 func keepClaudeClassifierSystemPromptDoc(doc *ojson.Doc, system ojson.Result, billingBlock string) {
 	blocks := []string{billingBlock}
-	if system.Type == ojson.String {
-		if text := system.String(); strings.TrimSpace(text) != "" && !util.IsClaudeCodeAttributionSystemText(text) {
-			blocks = append(blocks, buildTextBlock(text, nil))
-		}
+	for _, block := range collectForwardedClaudeSystemPromptBlocksWithCache(system) {
+		// Explicit mode keeps the caller's validated cache_control and drops a malformed one.
+		blocks = append(blocks, buildForwardedSystemBlock(block.Text, block, true))
 	}
-	system.ForEach(func(_, part ojson.Result) bool {
-		text := part.Get("text").String()
-		if part.Get("type").String() == "text" && strings.TrimSpace(text) != "" && !util.IsClaudeCodeAttributionSystemText(text) {
-			blocks = append(blocks, part.Raw)
-		}
-		return true
-	})
 	_ = doc.SetRawBytes("system", []byte("["+strings.Join(blocks, ",")+"]"))
 }
 

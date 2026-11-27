@@ -15,6 +15,7 @@ import (
 	"github.com/MoeForge/moego/regexp"
 	"github.com/google/uuid"
 	homekv "github.com/router-for-me/CLIProxyAPI/v8/internal/home"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 )
 
 const (
@@ -793,17 +794,46 @@ func isClaudeTitleHelperRequest(body []byte) bool {
 // auto-mode permission classifier.
 const claudeAutoModeClassifierPrompt = "You are a security monitor for autonomous AI coding agents."
 
-// IsClaudeAutoModeClassifierSystem reports whether a request "system" field is
-// the one of Claude Code's auto-mode permission classifier. Claude Code sends
-// it with its own system prompt and no CLI identity block.
-func IsClaudeAutoModeClassifierSystem(system ojson.Result) bool {
+// IsClaudeAutoModeClassifierRequest reports whether a request has the shape of
+// Claude Code's auto-mode permission classifier: the classifier system prompt,
+// no tools, no tool_choice, and only user turns. Claude Code sends it with its
+// own system prompt and no CLI identity block. A request with tools is an
+// ordinary agent turn even when its system prompt opens with the classifier
+// sentence, so it must keep the ordinary cloaked shape.
+func IsClaudeAutoModeClassifierRequest(doc *ojson.Doc) bool {
+	if doc == nil || !isClaudeAutoModeClassifierSystem(doc.Get("system")) {
+		return false
+	}
+	if tools := doc.Get("tools"); tools.Exists() && (!tools.IsArray() || len(tools.Array()) > 0) {
+		return false
+	}
+	if doc.Get("tool_choice").Exists() {
+		return false
+	}
+	messages := doc.Get("messages")
+	if !messages.IsArray() || len(messages.Array()) == 0 {
+		return false
+	}
+	for _, msg := range messages.Array() {
+		if msg.Get("role").String() != "user" {
+			return false
+		}
+	}
+	return true
+}
+
+func isClaudeAutoModeClassifierSystem(system ojson.Result) bool {
 	if system.Type == ojson.String {
 		return strings.HasPrefix(system.String(), claudeAutoModeClassifierPrompt)
 	}
 	found := false
 	system.ForEach(func(_, part ojson.Result) bool {
-		found = strings.HasPrefix(part.Get("text").String(), claudeAutoModeClassifierPrompt)
-		return !found
+		text := part.Get("text").String()
+		if strings.TrimSpace(text) == "" || util.IsClaudeCodeAttributionSystemText(text) {
+			return true
+		}
+		found = strings.HasPrefix(text, claudeAutoModeClassifierPrompt)
+		return false
 	})
 	return found
 }
