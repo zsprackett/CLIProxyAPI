@@ -1073,8 +1073,10 @@ func TestWriteClaudeErrorResponseDropsMalformedUpstreamDetails(t *testing.T) {
 	if got := ojson.GetBytesNoCopy(body, "error.type").String(); got != "invalid_request_error" {
 		t.Fatalf("error.type = %q, want invalid_request_error; body=%s", got, body)
 	}
-	if got := ojson.GetBytesNoCopy(body, "error.message").String(); got == "" || got == http.StatusText(http.StatusInternalServerError) {
-		t.Fatalf("error.message = %q, want the upstream error; body=%s", got, body)
+	// The upstream text is invalid JSON as a whole, so the message is the raw
+	// upstream text, as it was before details were forwarded.
+	if got := ojson.GetBytesNoCopy(body, "error.message").String(); got != malformedDetailsClaudeError {
+		t.Fatalf("error.message = %q, want the raw upstream error; body=%s", got, body)
 	}
 	if ojson.GetBytesNoCopy(body, "error.details").Exists() {
 		t.Fatalf("malformed details forwarded; body=%s", body)
@@ -1142,6 +1144,27 @@ func TestClaudeErrorMarksMissingThreadWithUnusableErrorCode(t *testing.T) {
 				t.Fatalf("error.details.hint = %q, want replay; body=%s", got, body)
 			}
 		})
+	}
+}
+
+func TestWriteClaudeDirectErrorMarksMissingThreadWithNullErrorCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	handler := &ClaudeCodeAPIHandler{}
+
+	handler.WriteErrorResponse(c, &interfaces.ErrorMessage{
+		StatusCode:     http.StatusNotFound,
+		DirectResponse: true,
+		Body:           []byte(`{"type":"error","error":{"type":"not_found_error","message":"No thread state was found for the requested previous_message_id.","details":{"error_code":null,"hint":"replay"}}}`),
+	})
+
+	body := recorder.Body.Bytes()
+	if got := ojson.GetBytesNoCopy(body, "error.details.error_code").String(); got != "thread_not_found" {
+		t.Fatalf("error.details.error_code = %q, want thread_not_found; body=%s", got, body)
+	}
+	if got := ojson.GetBytesNoCopy(body, "error.details.hint").String(); got != "replay" {
+		t.Fatalf("error.details.hint = %q, want replay; body=%s", got, body)
 	}
 }
 
