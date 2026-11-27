@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -137,17 +136,16 @@ func markModelRateLimit(manager *Manager, authID, model string, headers http.Hea
 }
 
 // assertModelRoutable sends a request for model and checks whether the manager
-// refuses it with a local cooldown or lets it through to the executor.
+// refuses it locally or lets it through to the executor. The executor never
+// fails, so any error is a local refusal.
 func assertModelRoutable(t *testing.T, manager *Manager, model string, want bool) {
 	t.Helper()
 	_, errExecute := manager.Execute(context.Background(), []string{"claude"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
-	var cooldownErr *modelCooldownError
-	cooled := errors.As(errExecute, &cooldownErr)
 	if want && errExecute != nil {
 		t.Fatalf("%s request error = %v, want it routed after the poll", model, errExecute)
 	}
-	if !want && !cooled {
-		t.Fatalf("%s request error = %v, want a local cooldown refusal", model, errExecute)
+	if !want && errExecute == nil {
+		t.Fatalf("%s request was routed, want a local refusal", model)
 	}
 }
 
@@ -241,6 +239,43 @@ func TestQuotaPollClearsFableOverageCooldownOnceFableWindowHasRoom(t *testing.T)
 	assertModelRoutable(t, manager, scopedFableModel, false)
 	pollOnce(t, manager, authID)
 	assertModelRoutable(t, manager, scopedFableModel, true)
+}
+
+func TestQuotaPollKeepsOverageCooldownFromDisabledReason(t *testing.T) {
+	headers := quotaTestHeaders(
+		"Anthropic-Ratelimit-Unified-Status", "rejected",
+		"Anthropic-Ratelimit-Unified-5h-Status", "allowed",
+		"Anthropic-Ratelimit-Unified-7d-Status", "allowed",
+		"Anthropic-Ratelimit-Unified-Overage-Disabled-Reason", "org_spend_cap_reached",
+	)
+	manager, authID := newScopedPollManager(t, claudePollSpec{
+		fiveHour: 20, sevenDay: 40, fable: percentPtr(10),
+		extra: &ClaudeExtraUsage{Enabled: false},
+	})
+	markModelRateLimit(manager, authID, scopedOpusModel, headers)
+	assertModelRoutable(t, manager, scopedOpusModel, false)
+	pollOnce(t, manager, authID)
+	assertModelRoutable(t, manager, scopedOpusModel, false)
+}
+
+// A held Fable cooldown must not make each later poll reset the credential
+// again, because that reset also wipes cooldowns the poll says nothing about.
+func TestQuotaPollWithHeldFableCooldownLeavesLaterNonQuotaBlock(t *testing.T) {
+	manager, authID := newScopedPollManager(t, claudePollSpec{fiveHour: 20, sevenDay: 40, fable: percentPtr(100)})
+	markModelRateLimit(manager, authID, scopedFableModel, fableOnlyRejection())
+	markCredentialQuota(manager, authID, "claude")
+	pollOnce(t, manager, authID)
+	assertModelRoutable(t, manager, scopedOpusModel, true)
+	manager.MarkResult(context.Background(), Result{
+		AuthID:   authID,
+		Provider: "claude",
+		Model:    scopedOpusModel,
+		Error:    &Error{Code: "not_found", Message: "404", HTTPStatus: http.StatusNotFound},
+	})
+	assertModelRoutable(t, manager, scopedOpusModel, false)
+	pollOnce(t, manager, authID)
+	assertModelRoutable(t, manager, scopedOpusModel, false)
+	assertModelRoutable(t, manager, scopedFableModel, false)
 }
 
 func TestQuotaPollClearsOpusCooldownButKeepsFableCooldown(t *testing.T) {
