@@ -3127,7 +3127,7 @@ func claudeNativeMainCacheTTL1h(cfg *config.Config, auth *cliproxyauth.Auth, fp 
 	}
 	if auth != nil {
 		for name, value := range auth.Attributes {
-			if strings.EqualFold(name, "header:Anthropic-Beta") && !claudeRequestedBetas(value, nil)[claudeExtendedCacheTTLBeta] {
+			if header, ok := util.CustomHeaderName(name); ok && header == "Anthropic-Beta" && !claudeRequestedBetas(value, nil)[claudeExtendedCacheTTLBeta] {
 				return false
 			}
 		}

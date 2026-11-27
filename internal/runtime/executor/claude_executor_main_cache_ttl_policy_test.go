@@ -102,6 +102,7 @@ func TestClaudeExecutor_MainCacheTTL1hSkipsWhenExtendedCacheBetaNotSent(t *testi
 	}{
 		{name: "header-defaults strip", strip: []string{claudeExtendedCacheTTLBeta}},
 		{name: "auth header override", authAttrs: map[string]string{"header:Anthropic-Beta": "claude-code-20250219"}},
+		{name: "spaced auth header override", authAttrs: map[string]string{"header: Anthropic-Beta ": "claude-code-20250219"}},
 	}
 	for _, policy := range policies {
 		for _, stream := range []bool{false, true} {
