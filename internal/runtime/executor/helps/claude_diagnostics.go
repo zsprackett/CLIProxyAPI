@@ -15,6 +15,7 @@ import (
 	"github.com/MoeForge/moego/regexp"
 	"github.com/google/uuid"
 	homekv "github.com/router-for-me/CLIProxyAPI/v8/internal/home"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 )
 
 const (
@@ -827,8 +828,12 @@ func isClaudeAutoModeClassifierSystem(system ojson.Result) bool {
 	}
 	found := false
 	system.ForEach(func(_, part ojson.Result) bool {
-		found = strings.HasPrefix(part.Get("text").String(), claudeAutoModeClassifierPrompt)
-		return !found
+		text := part.Get("text").String()
+		if strings.TrimSpace(text) == "" || util.IsClaudeCodeAttributionSystemText(text) {
+			return true
+		}
+		found = strings.HasPrefix(text, claudeAutoModeClassifierPrompt)
+		return false
 	})
 	return found
 }

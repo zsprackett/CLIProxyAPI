@@ -162,31 +162,47 @@ func TestClaudeExecutor_OAuthClassifierKeepsItsSystemPrompt(t *testing.T) {
 	}
 }
 
-// A tool-enabled request that forces a tool call is not the classifier, even
-// when its system prompt opens with the classifier sentence. On an OAuth
-// credential it keeps the ordinary cloaked shape: the CLI identity block at
-// the top level and the caller prompt relocated out of it.
-func TestClaudeExecutor_OAuthToolRequestWithClassifierPrefixIsRelocated(t *testing.T) {
-	payload := []byte(`{"model":"claude-sonnet-5","max_tokens":4096,` +
-		`"system":[{"type":"text","text":"` + classifierSystemPrompt + ` Then call inspect."}],` +
-		`"tools":[{"name":"inspect","description":"Inspect a file.","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}],` +
-		`"tool_choice":{"type":"tool","name":"inspect"},` +
-		`"messages":[{"role":"user","content":[{"type":"text","text":"Check main.go"}]}]}`)
-	for _, mode := range classifierModes() {
-		t.Run(mode.name, func(t *testing.T) {
-			auth, cfg := classifierOAuth()
-			body := sendClassifierRequestWithAuth(t, mode.stream, payload, auth, cfg)
+// A request that is not the classifier keeps the ordinary cloaked shape on an
+// OAuth credential, even when its system prompt opens with the classifier
+// sentence: the CLI identity block at the top level and the caller prompt
+// relocated out of it. Each case breaks one classifier trait.
+func TestClaudeExecutor_OAuthNonClassifierWithClassifierPrefixIsRelocated(t *testing.T) {
+	const inspectTool = `"tools":[{"name":"inspect","description":"Inspect a file.","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}],`
+	const userTurn = `{"role":"user","content":[{"type":"text","text":"Check main.go"}]}`
+	cases := []struct {
+		name   string
+		fields string
+		turns  string
+	}{
+		{"forced tool", inspectTool + `"tool_choice":{"type":"tool","name":"inspect"},`, userTurn},
+		{"tools only", inspectTool, userTurn},
+		{"tool_choice only", `"tool_choice":{"type":"auto"},`, userTurn},
+		{"assistant turn", "", userTurn + `,{"role":"assistant","content":[{"type":"text","text":"Looking."}]},` + userTurn},
+		{"prefix on a later block", "", userTurn},
+	}
+	for _, tc := range cases {
+		system := `[{"type":"text","text":"` + classifierSystemPrompt + ` Then call inspect."}]`
+		if tc.name == "prefix on a later block" {
+			system = `[{"type":"text","text":"You are a helpful reviewer."},{"type":"text","text":"` + classifierSystemPrompt + `"}]`
+		}
+		payload := []byte(`{"model":"claude-sonnet-5","max_tokens":4096,"system":` + system + `,` + tc.fields +
+			`"messages":[` + tc.turns + `]}`)
+		for _, mode := range classifierModes() {
+			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
+				auth, cfg := classifierOAuth()
+				body := sendClassifierRequestWithAuth(t, mode.stream, payload, auth, cfg)
 
-			if got := ojson.GetBytes(body, "system.1.text").String(); got != claudeCodeCLIIdentity {
-				t.Fatalf("system.1 = %q, want the CLI identity block; system=%s", got, ojson.GetBytes(body, "system").Raw)
-			}
-			if raw := ojson.GetBytes(body, "system").Raw; strings.Contains(raw, "security monitor") {
-				t.Fatalf("system = %s, want the caller prompt relocated out of the top-level system", raw)
-			}
-			if raw := ojson.GetBytes(body, "messages").Raw; !strings.Contains(raw, "security monitor") {
-				t.Fatalf("messages = %s, want the relocated caller prompt", raw)
-			}
-		})
+				if got := ojson.GetBytes(body, "system.1.text").String(); got != claudeCodeCLIIdentity {
+					t.Fatalf("system.1 = %q, want the CLI identity block; system=%s", got, ojson.GetBytes(body, "system").Raw)
+				}
+				if raw := ojson.GetBytes(body, "system").Raw; strings.Contains(raw, "security monitor") {
+					t.Fatalf("system = %s, want the caller prompt relocated out of the top-level system", raw)
+				}
+				if raw := ojson.GetBytes(body, "messages").Raw; !strings.Contains(raw, "security monitor") {
+					t.Fatalf("messages = %s, want the relocated caller prompt", raw)
+				}
+			})
+		}
 	}
 }
 
